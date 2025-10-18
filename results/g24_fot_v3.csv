@@ -1,0 +1,7 @@
+id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
+g24_001,fot,game24,24,8,0,,,
+g24_002,fot,game24,24,24,1,,,
+g24_003,fot,game24,24,24,1,,,
+g24_004,fot,game24,24,24,1,,,
+g24_005,fot,game24,24,11,0,,,
+g24_006,fot,game24,24,24,1,,,

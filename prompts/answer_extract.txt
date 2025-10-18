@@ -1,0 +1,1 @@
+Extract the final numeric answer. If multiple candidates appear, return the most recent `ANSWER: <...>` value.
