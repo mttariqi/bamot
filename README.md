@@ -17,7 +17,7 @@ Unlike conventional *Chain-of-Thought (CoT)*, *Self-Consistent CoT (SC-CoT)*, *T
 The controller generates multiple **micro-seeds**, evaluates them via **lightweight triage**, and refines only top-ranked candidates through **selective reasoning and early stopping**.
 
 <p align="center">
-  <img src="figures/bamot_pipeline_pro.png" width="90%">
+  <img src="figures/bamot_pipeline.png" width="90%">
 </p>
 
 > **Fig. 1.** BAMoT pipeline — Starting from an input question, the controller generates diverse micro-seeds, scores them via lightweight triage, and allocates the remaining budget to refine top-K candidates with early stopping and consensus.
