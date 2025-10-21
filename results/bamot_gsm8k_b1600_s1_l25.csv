@@ -1,0 +1,6 @@
+id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
+gsm_001,bamot,gsm8k,11,11,1,781,755,3.468073546886444
+gsm_002,bamot,gsm8k,26,26,1,799,801,3.2642220854759216
+gsm_003,bamot,gsm8k,13,13,1,783,717,2.701512098312378
+gsm_004,bamot,gsm8k,140,140,1,776,790,3.192862153053284
+gsm_005,bamot,gsm8k,23,23,1,780,704,2.533587455749512
