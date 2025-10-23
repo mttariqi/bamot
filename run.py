@@ -48,6 +48,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--method", required=True, choices=["cot","sc_cot","bamot","tot","got","fot"])
     ap.add_argument("--dataset", required=True, choices=["gsm8k","game24","strategyqa","aime","math500"])
+    ap.add_argument("--limit", type=int, default=None, help="Run only the first N items of the loaded dataset.")
 
     # model settings
     ap.add_argument("--model", default="gpt-4o-mini")
@@ -88,8 +89,11 @@ def main():
     # logger
     csv_path = f"results/{exp_name}.csv"
     log = CSVLogger(csv_path, header=["id","method","dataset","gold","pred","correct","prompt_toks","completion_toks","latency_sec"])
-
+   
     data = load_dataset(args.dataset)
+    data = load_dataset(args.dataset)
+    if args.limit is not None:
+        data = data[:args.limit]
     run_fn = get_method(args.method)
 
     # Gateway configured with *default* max_tokens (methods may override)
@@ -97,12 +101,22 @@ def main():
     cot_system = PROMPTS["cot_system"]
 
     for item in tqdm(data, desc=f"Running {args.method} on {args.dataset}"):
+        # === NEW: dataset-specific wrapping so StrategyQA yields "yes"/"no" ===
+        if args.dataset == "strategyqa":
+            item_for_method = dict(item)  # shallow copy so logging still uses original
+            q = item.get("question", "")
+            item_for_method["question"] = (
+                "Answer strictly with a single word: yes or no.\n"
+                "Question: " + q + "\n"
+                "Answer:"
+            )
+        
         if args.method == "sc_cot":
-            out = run_fn(item, gateway=gw, cot_system=cot_system, sc_samples=args.sc_samples)
+            out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, sc_samples=args.sc_samples)
 
         elif args.method == "bamot":
             out = run_fn(
-                item,
+                item_for_method,
                 gateway=gw,
                 cot_system=cot_system,
                 seeds=args.seeds,
@@ -117,7 +131,7 @@ def main():
 
         elif args.method == "tot":
             out = run_fn(
-                item,
+                item_for_method,
                 gateway=gw,
                 cot_system=cot_system,
                 branch=args.tot_branch,
@@ -126,7 +140,7 @@ def main():
 
         elif args.method == "got":
             out = run_fn(
-                item,
+                item_for_method,
                 gateway=gw,
                 cot_system=cot_system,
                 steps=args.got_steps,
@@ -135,7 +149,7 @@ def main():
 
         elif args.method == "fot":
             out = run_fn(
-                item,
+                item_for_method,
                 gateway=gw,
                 cot_system=cot_system,
                 trees=args.fot_trees,
@@ -144,7 +158,7 @@ def main():
             )
 
         else:  # "cot"
-            out = run_fn(item, gateway=gw, cot_system=cot_system)
+            out = run_fn(item_for_method, gateway=gw, cot_system=cot_system)
 
         pred = out.get("pred")
         gold = item.get("answer")
