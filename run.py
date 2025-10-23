@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from utils.model_gateway import ModelGateway
 from utils.logger import CSVLogger
-from utils.evals import is_correct
+from utils.evals import is_correct, bool_match
 
 PROMPTS = {
     "cot_system": open("prompts/cot_prompt.txt","r").read().strip(),
@@ -18,6 +18,15 @@ def load_dataset(name: str):
     if name == "game24":
         mod = importlib.import_module("loaders.game24")
         return mod.load()
+    if name == "strategyqa":
+        mod = importlib.import_module("loaders.strategyqa")
+        return mod.load()   
+    if name == "aime":
+        mod = importlib.import_module("loaders.aime")
+        return mod.load() 
+    if name == "math500":
+        mod = importlib.import_module("loaders.math500")
+        return mod.load()          
     raise ValueError(f"Unknown dataset: {name}")
 
 def get_method(name: str):
@@ -38,7 +47,7 @@ def get_method(name: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--method", required=True, choices=["cot","sc_cot","bamot","tot","got","fot"])
-    ap.add_argument("--dataset", required=True, choices=["gsm8k","game24"])
+    ap.add_argument("--dataset", required=True, choices=["gsm8k","game24","strategyqa","aime","math500"])
 
     # model settings
     ap.add_argument("--model", default="gpt-4o-mini")
@@ -140,6 +149,11 @@ def main():
         pred = out.get("pred")
         gold = item.get("answer")
         corr = is_correct(pred, gold)
+        # Use boolean evaluator for StrategyQA; otherwise keep your numeric/text is_correct
+        if args.dataset == "strategyqa":
+            corr = bool_match(pred, gold)
+        else:
+            corr = is_correct(pred, gold)
         usage = out.get("usage", {}) or {}
         lat = out.get("latency", None)
 
