@@ -17,3 +17,18 @@ def is_correct(pred: str, gold: str) -> bool:
     if pred is None:
         return False
     return pred.strip() == str(gold).strip()
+# === Boolean evaluation for StrategyQA (append-only) ===
+
+
+_STRAT_YES = {"yes", "true", "y", "t", "correct"}
+_STRAT_NO  = {"no", "false", "n", "f", "incorrect"}
+
+def _normalize_bool_for_strategyqa(text: str) -> str:
+    s = re.sub(r"[^a-z]", "", str(text).lower())
+    if s in _STRAT_YES: return "yes"
+    if s in _STRAT_NO:  return "no"
+    return s  # fallback (will likely not match)
+
+def bool_match(pred: str, gold: str) -> bool:
+    """Return True iff pred and gold are the same normalized yes/no."""
+    return _normalize_bool_for_strategyqa(pred) == _normalize_bool_for_strategyqa(gold)
