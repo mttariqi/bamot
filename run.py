@@ -20,13 +20,13 @@ def load_dataset(name: str):
         return mod.load()
     if name == "strategyqa":
         mod = importlib.import_module("loaders.strategyqa")
-        return mod.load()   
+        return mod.load()
     if name == "aime":
         mod = importlib.import_module("loaders.aime")
-        return mod.load() 
+        return mod.load()
     if name == "math500":
         mod = importlib.import_module("loaders.math500")
-        return mod.load()          
+        return mod.load()
     raise ValueError(f"Unknown dataset: {name}")
 
 def get_method(name: str):
@@ -88,12 +88,16 @@ def main():
 
     # logger
     csv_path = f"results/{exp_name}.csv"
+    if os.path.exists(csv_path):  # ← NEW: overwrite old runs with same exp_name
+       os.remove(csv_path)       # ← NEW
+
     log = CSVLogger(csv_path, header=["id","method","dataset","gold","pred","correct","prompt_toks","completion_toks","latency_sec"])
-   
-    data = load_dataset(args.dataset)
+
+    # data
     data = load_dataset(args.dataset)
     if args.limit is not None:
         data = data[:args.limit]
+
     run_fn = get_method(args.method)
 
     # Gateway configured with *default* max_tokens (methods may override)
@@ -101,16 +105,29 @@ def main():
     cot_system = PROMPTS["cot_system"]
 
     for item in tqdm(data, desc=f"Running {args.method} on {args.dataset}"):
-        # === NEW: dataset-specific wrapping so StrategyQA yields "yes"/"no" ===
+        t0 = time.time()  # fallback latency timer
+
+        # Always define item_for_method; override only for StrategyQA
+        item_for_method = item
         if args.dataset == "strategyqa":
-            item_for_method = dict(item)  # shallow copy so logging still uses original
+            i2 = dict(item)  # shallow copy so logging uses original item
             q = item.get("question", "")
-            item_for_method["question"] = (
+            i2["question"] = (
                 "Answer strictly with a single word: yes or no.\n"
                 "Question: " + q + "\n"
                 "Answer:"
             )
-        
+            item_for_method = i2
+        elif args.dataset in ("aime", "math500"):        # ← NEW (add this small block)
+          i2 = dict(item)
+          q = item.get("question", "")
+          i2["question"] = (
+              "Give the final answer as a single number only (no words, no units).\n"
+              "Question: " + q + "\n"
+              "Answer:"
+          )
+          item_for_method = i2    
+
         if args.method == "sc_cot":
             out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, sc_samples=args.sc_samples)
 
@@ -162,14 +179,17 @@ def main():
 
         pred = out.get("pred")
         gold = item.get("answer")
-        corr = is_correct(pred, gold)
-        # Use boolean evaluator for StrategyQA; otherwise keep your numeric/text is_correct
+
+        # StrategyQA uses boolean evaluator; others keep numeric/text is_correct()
         if args.dataset == "strategyqa":
             corr = bool_match(pred, gold)
         else:
             corr = is_correct(pred, gold)
+
         usage = out.get("usage", {}) or {}
         lat = out.get("latency", None)
+        if lat is None:
+            lat = time.time() - t0
 
         log.log([
             item.get("id"),
