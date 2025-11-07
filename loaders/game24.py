@@ -108,5 +108,5 @@ def load(split: str = "dev", limit: Optional[int] = None) -> List[Dict]:
         raise NotImplementedError("StrategyQA full split will be plugged later.")
     data = _DEV if limit is None else _DEV[:limit]
     # Standardized fields expected by the harness
-    return [{"id": ex["id"], "question": ex["question"], "answer": ex["answer"], "meta": {"dataset": "strategyqa"}} for ex in data]
+    return [{"id": ex["id"], "question": ex["question"], "answer": ex["answer"], "meta": {"dataset": "game24"}} for ex in data]
 
