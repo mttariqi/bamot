@@ -1,6 +1,6 @@
-from typing import List, Dict
-def load():
-    return [
+from typing import List, Dict, Optional
+
+_DEV: List[Dict] = [
   {'id': 'g24-0001', 'numbers': [1, 1, 4, 6], 'question': 'Use 1, 1, 4, 6 with + - * / and parentheses to make 24. Show your steps and give one valid expression that evaluates to 24. End your output with: ANSWER: 24', 'answer': '24'},
   {'id': 'g24-0002', 'numbers': [1, 1, 11, 11], 'question': 'Use 1, 1, 11, 11 with + - * / and parentheses to make 24. Show your steps and give one valid expression that evaluates to 24. End your output with: ANSWER: 24', 'answer': '24'},
   {'id': 'g24-0003', 'numbers': [1, 1, 3, 8], 'question': 'Use 1, 1, 3, 8 with + - * / and parentheses to make 24. Show your steps and give one valid expression that evaluates to 24. End your output with: ANSWER: 24', 'answer': '24'},
@@ -102,3 +102,11 @@ def load():
   {'id': 'g24-0099', 'numbers': [4, 6, 6, 6], 'question': 'Use 4, 6, 6, 6 with + - * / and parentheses to make 24. Show your steps and give one valid expression that evaluates to 24. End your output with: ANSWER: 24', 'answer': '24'},
   {'id': 'g24-0100', 'numbers': [5, 5, 7, 7], 'question': 'Use 5, 5, 7, 7 with + - * / and parentheses to make 24. Show your steps and give one valid expression that evaluates to 24. End your output with: ANSWER: 24', 'answer': '24'},
 ]
+
+def load(split: str = "dev", limit: Optional[int] = None) -> List[Dict]:
+    if split != "dev":
+        raise NotImplementedError("StrategyQA full split will be plugged later.")
+    data = _DEV if limit is None else _DEV[:limit]
+    # Standardized fields expected by the harness
+    return [{"id": ex["id"], "question": ex["question"], "answer": ex["answer"], "meta": {"dataset": "strategyqa"}} for ex in data]
+
