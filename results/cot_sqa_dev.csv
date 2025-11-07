@@ -1,9 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-sqa-001,cot,strategyqa,yes,3.0,0,84,160,3.2426326274871826
-sqa-002,cot,strategyqa,no,0.0,1,84,163,3.374354839324951
-sqa-003,cot,strategyqa,no,3.0,1,87,149,3.43754243850708
-sqa-004,cot,strategyqa,no,0.0,1,84,159,2.598989486694336
-sqa-005,cot,strategyqa,yes,3.0,0,82,141,2.988931655883789
-sqa-006,cot,strategyqa,no,,1,83,88,1.7283589839935305
-sqa-007,cot,strategyqa,yes,1.0,1,84,130,2.903257131576538
-sqa-008,cot,strategyqa,no,0.0,1,82,35,1.0321660041809082

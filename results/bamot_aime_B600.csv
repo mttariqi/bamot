@@ -1,5 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-aime-001,bamot,aime,5,5,1,300,281,3.2742223739624023
-aime-002,bamot,aime,40,40,1,297,214,3.053506374359131
-aime-003,bamot,aime,11,11,1,301,282,3.284342765808105
-aime-004,bamot,aime,720,720,1,299,263,3.601753234863281

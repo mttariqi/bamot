@@ -1,9 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-sqa-001,bamot,strategyqa,yes,3,0,537,408,3.608114322026571
-sqa-002,bamot,strategyqa,no,2,1,748,338,2.517068326473236
-sqa-003,bamot,strategyqa,no,0,1,425,453,3.766457319259644
-sqa-004,bamot,strategyqa,no,0,1,418,464,3.2400781313578286
-sqa-005,bamot,strategyqa,yes,1,1,565,488,3.3861730098724365
-sqa-006,bamot,strategyqa,no,3,1,670,391,2.2761914134025574
-sqa-007,bamot,strategyqa,yes,1,1,392,442,3.8304248650868735
-sqa-008,bamot,strategyqa,no,0,1,436,466,3.808704455693563

@@ -1,5 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-m500-001,bamot,math500,210,2,0,379,293,2.144344965616862
-m500-002,bamot,math500,7,5,0,297,260,3.631339311599731
-m500-003,bamot,math500,6,15,0,293,400,4.006635904312134
-m500-004,bamot,math500,80,2,0,294,337,3.4265832901000977

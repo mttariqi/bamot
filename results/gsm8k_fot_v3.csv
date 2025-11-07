@@ -1,6 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-gsm_001,fot,gsm8k,11,11,1,,,
-gsm_002,fot,gsm8k,26,26,1,,,
-gsm_003,fot,gsm8k,13,13,1,,,
-gsm_004,fot,gsm8k,140,140,1,,,
-gsm_005,fot,gsm8k,23,23,1,,,

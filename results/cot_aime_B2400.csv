@@ -1,5 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-aime-001,cot,aime,5,5,1,97,186,3.4918434619903564
-aime-002,cot,aime,40,40,1,96,138,3.200822591781616
-aime-003,cot,aime,11,11,1,98,196,5.466861963272095
-aime-004,cot,aime,720,720,1,97,206,3.665407419204712

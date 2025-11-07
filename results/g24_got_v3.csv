@@ -1,7 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-g24_001,got,game24,24,24,1,1901,1983,
-g24_002,got,game24,24,24,1,1377,1190,
-g24_003,got,game24,24,24,1,1239,676,
-g24_004,got,game24,24,24,1,1305,801,
-g24_005,got,game24,24,24,1,1575,1027,
-g24_006,got,game24,24,24,1,3796,3574,

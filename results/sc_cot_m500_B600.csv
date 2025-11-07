@@ -1,5 +1,0 @@
-id,method,dataset,gold,pred,correct,prompt_toks,completion_toks,latency_sec
-m500-001,sc_cot,math500,210,210,1,267,500,3.6013919512430825
-m500-002,sc_cot,math500,7,7,1,288,505,4.808566967646281
-m500-003,sc_cot,math500,6,7,0,282,768,5.771015803019206
-m500-004,sc_cot,math500,80,80,1,282,654,4.540364424387614
