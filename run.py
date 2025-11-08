@@ -22,9 +22,7 @@ def load_dataset(name: str):
     if name == "strategyqa":
         mod = importlib.import_module("loaders.strategyqa")
         return mod.load()
-    if name == "aime":
-        mod = importlib.import_module("loaders.aime")
-        return mod.load()
+    
     if name == "math500":
         mod = importlib.import_module("loaders.math500")
         return mod.load()
@@ -66,7 +64,7 @@ def _load_done_ids(csv_path: str) -> set:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--method", required=True, choices=["cot","sc_cot","bamot","tot","got","fot"])
-    ap.add_argument("--dataset", required=True, choices=["gsm8k","game24","strategyqa","aime","math500"])
+    ap.add_argument("--dataset", required=True, choices=["gsm8k","game24","strategyqa","math500"])
     ap.add_argument("--limit", type=int, default=None, help="Run only the first N items (after resume filtering).")
 
     # model settings
@@ -87,6 +85,7 @@ def main():
     ap.add_argument("--bamot_refine_tokens", type=int, default=256)  # refinement token cap
     ap.add_argument("--bamot_early_stop_gold", action="store_true")  # stop if pred == gold
     ap.add_argument("--bamot_gold_value", default=None)              # override gold (e.g., "24")
+    ap.add_argument("--bamot_refine_topk", type=int, default=2)
 
     # ===== ToT / GoT / FoT knobs for fair, budget-matched runs =====
     ap.add_argument("--tot_branch", type=int, default=3)
@@ -102,7 +101,7 @@ def main():
     # ===== NEW: persistence & resume =====
     ap.add_argument("--out_dir", type=str, default="results", help="Directory to write per-run CSVs.")
     ap.add_argument("--resume_from", type=str, default="", help="Existing CSV path to resume from (skip already-done IDs).")
-
+    
     args = ap.parse_args()
 
     # --- output paths ---
@@ -156,15 +155,20 @@ def main():
                 "Answer:"
             )
             item_for_method = i2
-        elif args.dataset in ("aime", "math500"):
+        # in run.py, inside main(), where item_for_method is prepared
+        elif args.dataset in ( "math500"):
             i2 = dict(item)
             q = item.get("question", "")
             i2["question"] = (
-                "Give the final answer as a single number only (no words, no units).\n"
+                "Solve carefully. Give ONLY the final numeric answer.\n"
+                "If the result is an integer, output just the integer.\n"
+                "If it is a rational, use a simple fraction a/b with no spaces.\n"
+                "End EXACTLY with: ANSWER: <number>\n\n"
                 "Question: " + q + "\n"
                 "Answer:"
             )
-            item_for_method = i2
+        item_for_method = i2
+
 
         # --- dispatch per method ---
         if args.method == "sc_cot":
@@ -183,6 +187,8 @@ def main():
                 refine_tokens=args.bamot_refine_tokens,
                 early_stop_gold=args.bamot_early_stop_gold,
                 gold_value=args.bamot_gold_value,
+                refine_topk=args.bamot_refine_topk,   # NEW
+
             )
 
         elif args.method == "tot":

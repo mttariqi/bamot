@@ -1,64 +1,47 @@
-import sys, pandas as pd, numpy as np
-import matplotlib.pyplot as plt
+import os, glob, sys
+import pandas as pd
 
-def p50(x): return np.percentile(x.dropna().values, 50) if len(x.dropna()) else np.nan
-def p90(x): return np.percentile(x.dropna().values, 90) if len(x.dropna()) else np.nan
+def main(argv):
+    # Directory where CSVs live (default: ./results)
+    in_dir = "results"
+    if len(argv) >= 1:
+        in_dir = argv[0]
 
-def main(paths):
+    # Methods & datasets you actually used (no AIME)
+    methods  = ["bamot","cot","sc_cot","tot","got","fot"]
+    datasets = ["game24","strategyqa","math500","gsm8k"]  # include gsm8k if you’ll run it later
+
     frames = []
-    for p in paths:
-        df = pd.read_csv(p)
-        df["source"] = p.split("/")[-1].replace(".csv","")
-        frames.append(df)
+    for m in methods:
+        for d in datasets:
+            pattern = os.path.join(in_dir, f"*{m}_{d}_*.csv")
+            for csv in glob.glob(pattern):
+                try:
+                    df = pd.read_csv(csv)
+                    frames.append(df)
+                except Exception:
+                    pass
+
+    if not frames:
+        print("No CSVs found to plot/summarize. Check your results directory.")
+        return
+
     all_df = pd.concat(frames, ignore_index=True)
 
-    # coerce numerics
-    for col in ["prompt_toks","completion_toks","latency_sec","correct"]:
-        if col in all_df.columns:
-            all_df[col] = pd.to_numeric(all_df[col], errors="coerce")
-
+    # Example aggregate table
     summary = (all_df
-               .groupby(["method","dataset"], as_index=False)
+               .groupby(["method","dataset"], dropna=False)
                .agg(acc=("correct","mean"),
-                    p50lat=("latency_sec", p50),
-                    p90lat=("latency_sec", p90),
-                    prompt=("prompt_toks","sum"),
-                    completion=("completion_toks","sum"))
-               .sort_values(["dataset","method"]))
+                    mean_prompt=("prompt_toks","mean"),
+                    mean_comp=("completion_toks","mean"),
+                    mean_latency=("latency_sec","mean"),
+               ).reset_index())
+    summary["acc"] = (summary["acc"]*100).round(1)
 
-    print(summary)
-
-    labels = summary["method"] + " (" + summary["dataset"] + ")"
-    x = np.arange(len(labels))
-
-    # Accuracy
-    fig1, ax1 = plt.subplots(figsize=(9,4))
-    ax1.bar(x, summary["acc"]*100)
-    ax1.set_xticks(x, labels, rotation=30, ha="right")
-    ax1.set_ylabel("Accuracy (%)")
-    ax1.set_ylim(0, 110)
-    fig1.tight_layout()
-    fig1.savefig("results/_acc.png", dpi=160)
-
-    # Latency P50/P90
-    fig2, ax2 = plt.subplots(figsize=(9,4))
-    width = 0.35
-    ax2.bar(x - width/2, summary["p50lat"], width, label="P50")
-    ax2.bar(x + width/2, summary["p90lat"], width, label="P90")
-    ax2.set_xticks(x, labels, rotation=30, ha="right")
-    ax2.set_ylabel("Latency (s)")
-    ax2.legend()
-    fig2.tight_layout()
-    fig2.savefig("results/_latency.png", dpi=160)
-
-    # Total tokens
-    total_tokens = (summary["prompt"].fillna(0) + summary["completion"].fillna(0))
-    fig3, ax3 = plt.subplots(figsize=(9,4))
-    ax3.bar(x, total_tokens)
-    ax3.set_xticks(x, labels, rotation=30, ha="right")
-    ax3.set_ylabel("Total tokens")
-    fig3.tight_layout()
-    fig3.savefig("results/_tokens.png", dpi=160)
+    os.makedirs("figures", exist_ok=True)
+    summary.to_csv(os.path.join("figures","summary.csv"), index=False)
+    print("\n== Aggregate summary (saved to figures/summary.csv) ==")
+    print(summary.to_string(index=False))
 
 if __name__ == "__main__":
     main(sys.argv[1:])
