@@ -141,33 +141,28 @@ def main():
         os.fsync(f.fileno())
 
     # --- main loop ---
-    for item in tqdm(pending, desc=f"Running {args.method} on {args.dataset}"):
-        t0 = time.time()
+    for item in tqdm(data, desc=f"Running {args.method} on {args.dataset}"):
+        t0 = time.time()  # fallback latency timer
 
-        # Dataset-specific prompt adapter (kept from your version)
-        item_for_method = item
+        # Always start with a copy; customize prompt per dataset without leaking i2
+        item_for_method = dict(item)
+
         if args.dataset == "strategyqa":
-            i2 = dict(item)
             q = item.get("question", "")
-            i2["question"] = (
+            item_for_method["question"] = (
                 "Answer strictly with a single word: yes or no.\n"
                 "Question: " + q + "\n"
                 "Answer:"
             )
-            item_for_method = i2
-        # in run.py, inside main(), where item_for_method is prepared
-        elif args.dataset in ( "math500"):
-            i2 = dict(item)
+
+        elif args.dataset in ("aime", "math500"):
             q = item.get("question", "")
-            i2["question"] = (
-                "Solve carefully. Give ONLY the final numeric answer.\n"
-                "If the result is an integer, output just the integer.\n"
-                "If it is a rational, use a simple fraction a/b with no spaces.\n"
-                "End EXACTLY with: ANSWER: <number>\n\n"
+            item_for_method["question"] = (
+                "Give the final answer as a single number only (no words, no units). "
+                "End with: ANSWER: <number>\n"
                 "Question: " + q + "\n"
                 "Answer:"
             )
-        item_for_method = i2
 
 
         # --- dispatch per method ---
