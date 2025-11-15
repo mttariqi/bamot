@@ -31,6 +31,10 @@ class ModelGateway:
         self.backend = backend
         self.client = None
         self._llama = None
+        # Store llama parameters for cloning
+        self._llama_model_path = llama_model_path
+        self._llama_ctx = llama_ctx
+        self._llama_threads = llama_threads
 
         if backend == "openai":
             self.client = OpenAI() if _HAS_OPENAI else None
