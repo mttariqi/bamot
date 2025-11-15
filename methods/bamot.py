@@ -283,9 +283,15 @@ def run_item(
         if (total_prompt + total_comp) >= seed_budget_limit and len(seed_pool) > 0:
             break
 
-        tmp = ModelGateway(model=gateway.model,
-                           temperature=min(1.0, 0.2 + 0.2 * i),
-                           max_tokens=seed_tokens)
+        tmp = ModelGateway(
+            model=gateway.model,
+            temperature=min(1.0, 0.2 + 0.2 * i),
+            max_tokens=seed_tokens,
+            backend=gateway.backend,
+            llama_model_path=getattr(gateway, '_llama_model_path', None),
+            llama_ctx=getattr(gateway, '_llama_ctx', 4096),
+            llama_threads=getattr(gateway, '_llama_threads', None)
+        )
         prompt = f"{question}\n\n{_seed_tail(task_mode, target_nums)}"
         out = tmp.chat(system_prompt=cot_system, user_prompt=prompt)
 
@@ -333,7 +339,15 @@ def run_item(
             latencies.append(out["latency"])
 
     if not seed_pool:
-        tmp = ModelGateway(model=gateway.model, temperature=0.2, max_tokens=seed_tokens)
+        tmp = ModelGateway(
+            model=gateway.model,
+            temperature=0.2,
+            max_tokens=seed_tokens,
+            backend=gateway.backend,
+            llama_model_path=getattr(gateway, '_llama_model_path', None),
+            llama_ctx=getattr(gateway, '_llama_ctx', 4096),
+            llama_threads=getattr(gateway, '_llama_threads', None)
+        )
         prompt = f"{question}\n\n{_seed_tail(task_mode, target_nums)}"
         out = tmp.chat(system_prompt=cot_system, user_prompt=prompt)
         txt = out["text"]
@@ -348,7 +362,15 @@ def run_item(
 
     # ---------- 2) SELECTIVE REFINEMENTS ----------
     refine_gws = [
-        ModelGateway(model=gateway.model, temperature=t, max_tokens=refine_tokens)
+        ModelGateway(
+            model=gateway.model,
+            temperature=t,
+            max_tokens=refine_tokens,
+            backend=gateway.backend,
+            llama_model_path=getattr(gateway, '_llama_model_path', None),
+            llama_ctx=getattr(gateway, '_llama_ctx', 4096),
+            llama_threads=getattr(gateway, '_llama_threads', None)
+        )
         for t in (0.2, 0.4, 0.6, 0.8)
     ]
     rr = 0
