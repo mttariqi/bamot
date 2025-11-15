@@ -5,11 +5,9 @@ import pandas as pd
 from tqdm import tqdm
 
 from utils.model_gateway import ModelGateway
-from utils.evals import (
-    is_correct, bool_match, extract_numeric_answer,
-    is_game24_correct, extract_game24_expression
-)
+from utils.evals import is_correct, bool_match
 
+# ---------- Prompts ----------
 # ---------- System prompts (dataset-specific) ----------
 def _sys_math_numeric():
     return ("You are a careful math tutor. Solve the problem step by step, clearly. "
@@ -20,17 +18,17 @@ def _sys_boolean_yesno():
             "Do not include any numbers, punctuation, or extra text.")
 
 def _sys_game24():
+    # *** NEW: a Game24-specific system with NO numeric 'ANSWER:<number>' rule ***
     return ("You are a symbolic arithmetic solver. Your job is to output exactly ONE expression "
-            "that evaluates to 24 using the four given numbers exactly once and only the "
+            "that evaluates to 24 using the four given numbers exactly once each and only the "
             "operators +, -, *, / and parentheses. Do not provide explanations. "
             "Return a single expression on one line and end your message with: ANSWER: 24")
 
 SYSTEMS = {
     "math_numeric": _sys_math_numeric(),
     "boolean": _sys_boolean_yesno(),
-    "game24": _sys_game24(),
+    "game24": _sys_game24(),  # <-- was numeric before; now proper Game24
 }
-
 # ---------- Dataset / Method loaders ----------
 def load_dataset(name: str):
     if name == "gsm8k":
@@ -60,6 +58,10 @@ def get_method(name: str):
 
 # ---------- Helpers ----------
 def _load_done_ids(csv_path: str) -> set:
+    """
+    Read an existing results CSV and return the set of item IDs already completed.
+    Safe to call on non-existent or partially written files; returns empty set on failure.
+    """
     done = set()
     if csv_path and os.path.isfile(csv_path):
         try:
@@ -89,7 +91,14 @@ def main():
     ap.add_argument("--random_seed", type=int, default=42, help="RNG seed for --shuffle.")
 
     # model settings
-    ap.add_argument("--model", default="gpt-4o-mini")
+    ap.add_argument("--model", default="gpt-4o-mini",
+                    help="Model identifier (OpenAI name, llama label, etc.)")
+    ap.add_argument("--backend", choices=["openai", "llama_cpp"], default="openai",
+                    help="LLM backend to use. 'openai' (default) or 'llama_cpp' for local LLaMA models.")
+    ap.add_argument("--llama_model_path", type=str, default=os.getenv("LLAMA_MODEL_PATH", ""),
+                    help="Path to GGUF/GGML model for llama_cpp backend (or set LLAMA_MODEL_PATH).")
+    ap.add_argument("--llama_ctx", type=int, default=4096, help="Context window for llama_cpp backend.")
+    ap.add_argument("--llama_threads", type=int, default=None, help="CPU threads for llama_cpp backend.")
     ap.add_argument("--temperature", type=float, default=0.2)
     ap.add_argument("--max_tokens", type=int, default=512)
 
@@ -102,13 +111,13 @@ def main():
     # ===== BAMoT controls / ablations =====
     ap.add_argument("--bamot_no_triage", action="store_true")
     ap.add_argument("--bamot_no_consensus", action="store_true")
-    ap.add_argument("--bamot_seed_tokens", type=int, default=80)
-    ap.add_argument("--bamot_refine_tokens", type=int, default=256)
-    ap.add_argument("--bamot_early_stop_gold", action="store_true")
-    ap.add_argument("--bamot_gold_value", default=None)
+    ap.add_argument("--bamot_seed_tokens", type=int, default=80)     # micro-seed token cap
+    ap.add_argument("--bamot_refine_tokens", type=int, default=256)  # refinement token cap
+    ap.add_argument("--bamot_early_stop_gold", action="store_true")  # stop if pred == gold
+    ap.add_argument("--bamot_gold_value", default=None)              # override gold (e.g., "24")
     ap.add_argument("--bamot_refine_topk", type=int, default=2)
 
-    # ===== ToT / GoT / FoT knobs =====
+    # ===== ToT / GoT / FoT knobs (keep light for small budgets) =====
     ap.add_argument("--tot_branch", type=int, default=3)
     ap.add_argument("--tot_depth", type=int, default=2)
     ap.add_argument("--got_beam", type=int, default=4)
@@ -118,8 +127,8 @@ def main():
     ap.add_argument("--fot_depth", type=int, default=1)
 
     # ===== Persistence & resume =====
-    ap.add_argument("--out_dir", type=str, default="results")
-    ap.add_argument("--resume_from", type=str, default="")
+    ap.add_argument("--out_dir", type=str, default="results", help="Directory to write per-run CSVs.")
+    ap.add_argument("--resume_from", type=str, default="", help="Existing CSV path to resume from (skip already-done IDs).")
 
     args = ap.parse_args()
 
@@ -138,20 +147,32 @@ def main():
     if len(done_ids) > 0:
         print(f"[resume] Found {len(done_ids)} completed IDs in: {resume_csv}")
 
+    # Build (id, example) pairs and remove done
     indexed = [( _get_example_id(ex, i), ex ) for i, ex in enumerate(examples)]
     pending_pairs = [(eid, ex) for (eid, ex) in indexed if eid not in done_ids]
 
+    # Shuffle BEFORE limiting if requested
     if args.shuffle and len(pending_pairs) > 1:
         rng = random.Random(args.random_seed)
         rng.shuffle(pending_pairs)
 
+    # Apply limit AFTER resume filtering (and shuffling, if any)
     if args.limit is not None:
         pending_pairs = pending_pairs[:int(args.limit)]
 
     print(f"[plan] Total loaded: {len(examples)} | To run now: {len(pending_pairs)} | Skipped(done): {len(done_ids)}")
 
     # --- model gateway & method ---
-    gw = ModelGateway(model=args.model, temperature=args.temperature, max_tokens=args.max_tokens)
+    # --- model gateway & method ---
+    gw = ModelGateway(
+        model=args.model,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        backend=args.backend,
+        llama_model_path=args.llama_model_path,
+        llama_ctx=args.llama_ctx,
+        llama_threads=args.llama_threads,
+    )
 
     # dataset-specific system prompt
     if args.dataset == "strategyqa":
@@ -174,14 +195,14 @@ def main():
         writer.writeheader()
         f.flush(); os.fsync(f.fileno())
 
-    # --- main loop ---
+    # --- main loop over ONLY the pending/limited items ---
     pbar_desc = f"Running {args.method} on {args.dataset}"
     for ex_id, ex in tqdm(pending_pairs, total=len(pending_pairs), desc=pbar_desc):
-        t0 = time.time()
+        t0 = time.time()  # fallback latency
 
+        # Copy example; shape prompt per dataset without mutating original
         item_for_method = dict(ex)
 
-        # Pre-shape question a bit for consistency
         if args.dataset == "strategyqa":
             q = ex.get("question", "")
             item_for_method["question"] = (
@@ -189,7 +210,7 @@ def main():
                 "Question: " + q + "\n"
                 "Answer:"
             )
-        elif args.dataset in ("math500","gsm8k"):
+        elif args.dataset in ("math500","gsm8k"):  # numeric only formatting
             q = ex.get("question", "")
             item_for_method["question"] = (
                 "Give the final answer as a single number only (no words, no units). "
@@ -202,7 +223,8 @@ def main():
             item_for_method["question"] = (
                 q + "\n\nOnly output ONE expression using all four numbers exactly once. "
                     "No steps. End with: ANSWER: 24"
-            )
+            )    
+        # (game24/gsm8k often fine as-is; keep loaders' formatting)
 
         # --- dispatch ---
         try:
@@ -210,66 +232,58 @@ def main():
                 out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, sc_samples=args.sc_samples)
 
             elif args.method == "bamot":
-                task_mode = "boolean" if args.dataset == "strategyqa" else ("game24" if args.dataset == "game24" else "numeric")
-                out = run_fn(
-                    item_for_method,
-                    gateway=gw,
-                    cot_system=cot_system,
-                    seeds=args.seeds,
-                    budget_tokens=args.budget_tokens,
-                    no_triage=args.bamot_no_triage,
-                    no_consensus=args.bamot_no_consensus,
-                    seed_tokens=args.bamot_seed_tokens,
-                    refine_tokens=args.bamot_refine_tokens,
-                    early_stop_gold=args.bamot_early_stop_gold,
-                    gold_value=args.bamot_gold_value,
-                    refine_topk=args.bamot_refine_topk,
-                    task_mode=task_mode,
-                )
+              task_mode = "boolean" if args.dataset == "strategyqa" else ("game24" if args.dataset == "game24" else "numeric")
+              out = run_fn(
+                  item_for_method,
+                  gateway=gw,
+                  cot_system=cot_system,
+                  seeds=args.seeds,
+                  budget_tokens=args.budget_tokens,
+                  no_triage=args.bamot_no_triage,
+                  no_consensus=args.bamot_no_consensus,
+                  seed_tokens=args.bamot_seed_tokens,
+                  refine_tokens=args.bamot_refine_tokens,
+                  early_stop_gold=args.bamot_early_stop_gold,
+                  gold_value=args.bamot_gold_value,
+                  refine_topk=args.bamot_refine_topk,
+                  task_mode=task_mode,   # <-- IMPORTANT
+              )
+
 
             elif args.method == "tot":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system,
-                             branch=args.tot_branch, depth=args.tot_depth, budget_tokens=args.budget_tokens)
+                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, branch=args.tot_branch, depth=args.tot_depth)
 
             elif args.method == "got":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system,
-                             steps=args.got_steps, beam=args.got_beam, budget_tokens=args.budget_tokens)
+                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, steps=args.got_steps, beam=args.got_beam)
 
             elif args.method == "fot":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system,
-                             trees=args.fot_trees, branch=args.fot_branch, depth=args.fot_depth, budget_tokens=args.budget_tokens)
+                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, trees=args.fot_trees, branch=args.fot_branch, depth=args.fot_depth)
 
             else:  # "cot"
                 out = run_fn(item_for_method, gateway=gw, cot_system=cot_system)
 
         except Exception as e:
+            # Log a failed row but keep the run going
             out = {"pred": f"ERROR: {type(e).__name__}: {e}", "usage": {}, "latency": time.time() - t0}
 
         pred = out.get("pred")
         gold = ex.get("answer")
 
-        # --------- dataset-specific grading ----------
-        if args.dataset == "game24":
-            # Prefer explicit expression; else extract from trace
-            expr = pred or extract_game24_expression(out.get("text","")) or ""
-            corr = is_game24_correct(expr if expr else out.get("text",""), ex.get("question",""))
-            pred = expr or pred  # keep expression in CSV
-
-        elif args.dataset in ("gsm8k","math500"):
-            # With fixed is_correct(), this now handles 'ANSWER: 123' gracefully
-            # Try pred first; if missing, try to extract from trace text
-            ptry = pred if pred is not None else extract_numeric_answer(out.get("text",""))
-            corr = is_correct(ptry, gold)
-            pred = ptry
-
-        elif args.dataset == "strategyqa":
+        # StrategyQA uses boolean evaluator; others numeric/text
+        if args.dataset == "strategyqa":
             corr = bool_match(pred, gold)
-
+        elif args.dataset == "game24":
+            # For game24 we grade by checking the returned expression against the question
+            from utils.evals import is_game24_correct
+            corr = is_game24_correct(out.get("text", "") if pred is None else str(pred), ex.get("question", ""))
         else:
             corr = is_correct(pred, gold)
 
+
         usage = out.get("usage", {}) or {}
-        latency = out.get("latency", None) or (time.time() - t0)
+        latency = out.get("latency", None)
+        if latency is None:
+            latency = time.time() - t0
 
         writer.writerow({
             "id": ex_id,

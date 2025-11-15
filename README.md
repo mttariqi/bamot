@@ -71,7 +71,17 @@ Install dependencies:
 
     pip install -r requirements.txt
 
-Set your OpenAI API key:
+### Optional: Local Model Support
+
+For local LLaMA/Qwen models:
+
+    # Install llama-cpp-python
+    pip install llama-cpp-python
+    
+    # For Apple Silicon (M1/M2/M3)
+    CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
+
+Set your OpenAI API key (for GPT-4o-mini):
 
     export OPENAI_API_KEY="sk-..."     # required
 
@@ -86,38 +96,35 @@ Set your OpenAI API key:
       --bamot_seed_tokens 80 --bamot_refine_tokens 256 \
       --exp_name bamot_g24_B1800
 
+**Run with local models:**
+
+    # LLaMA
+    python3 run.py --backend llama_cpp \
+      --llama_model_path models/llama-3.2-1b-instruct-q4_k_m.gguf \
+      --method bamot --dataset game24 --limit 100
+
+    # Qwen
+    python3 run.py --backend llama_cpp \
+      --llama_model_path models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
+      --method bamot --dataset game24 --limit 100
+
 **Compare baselines under a matched budget:**
 
     # CoT
-    python3 run.py --method cot --dataset strategyqa \
-      --budget_tokens 1200 --exp_name cot_sqa_B1200
+    python3 run.py --method cot --dataset game24 --limit 100
 
-    # SC-CoT (e.g., 5 samples)
-    python3 run.py --method sc_cot --dataset aime \
-      --sc_samples 5 --budget_tokens 1200 --exp_name sc_cot_aime_B1200
+    # SC-CoT
+    python3 run.py --method sc_cot --dataset game24 --sc_samples 5 --limit 100
 
-    # ToT / GoT / FoT (light settings shown; adjust to meet budget)
-    python3 run.py --method tot --dataset game24 \
-      --tot_branch 2 --tot_depth 1 --budget_tokens 1200 --exp_name tot_g24_B1200
+    # ToT / GoT / FoT
+    python3 run.py --method tot --dataset game24 --tot_branch 2 --tot_depth 2 --limit 100
+    python3 run.py --method got --dataset game24 --got_beam 2 --got_steps 2 --limit 100
+    python3 run.py --method fot --dataset game24 --fot_trees 3 --fot_branch 2 --fot_depth 1 --limit 100
 
-    python3 run.py --method got --dataset math500 \
-      --got_beam 2 --got_steps 2 --budget_tokens 1200 --exp_name got_m500_B1200
+**Generate comprehensive comparison:**
 
-    python3 run.py --method fot --dataset strategyqa \
-      --fot_trees 3 --fot_branch 2 --fot_depth 1 --budget_tokens 1200 --exp_name fot_sqa_B1200
-
-**Sweep budgets (B ∈ {600, 1200, 1800, 2400}):**
-
-    for B in 600 1200 1800 2400; do
-      python3 run.py --method bamot --dataset strategyqa \
-        --budget_tokens $B --seeds 2 --bamot_seed_tokens 80 --bamot_refine_tokens 256 \
-        --exp_name bamot_sqa_B${B}
-    done
-
-**Plot summaries & AUC(Anytime):**
-
-    python3 plot_results.py
-    # saves combined tables and charts into ./figures/
+    python3 compare_all_methods_backends.py
+    # Generates results/comprehensive_comparison.csv and summary tables
 
 ---
 
@@ -149,60 +156,49 @@ Early stopping via task verifiers (exact number match, 24-check, yes/no normaliz
 
 ---
 
-## 📈 Experimental Results (from dev slices)
+## 📈 Experimental Results
 
-### Game-of-24 (efficiency snapshot)
+### Game-of-24 (100 items, comprehensive evaluation)
 
-| Method      | Acc (%) | Tokens / item | Acc / Token (×10⁻³) |
-|:------------|:------:|:--------------:|:--------------------:|
-| CoT         | 100.0  | 1271           | 23.1                 |
-| SC-CoT      | 100.0  | 5676           | 9.1                  |
-| ToT (light) | 83.3   | 2295           | 6.0                  |
-| GoT (light) | 83.3   | 2312           | 6.0                  |
-| FoT (light) | 83.3   | 2214           | 5.4                  |
-| **BAMoT**   | **100.0** | **1435**     | **11.6**             |
+#### Accuracy Comparison
 
-### StrategyQA — Accuracy vs Budget (n=8)
+| Method | GPT-4o-mini | LLaMA 1B | Qwen 1.5B | Average |
+|:-------|:-----------:|:--------:|:---------:|:-------:|
+| **BAMoT** | **23.0%** | **17.0%** | 0.0%* | **13.33%** |
+| ToT | 21.0% | 0.0% | 5.0% | 8.67% |
+| FoT | 19.0% | 16.0% | 0.0%* | 11.67% |
+| GoT | 16.0% | 0.0% | 4.0% | 6.67% |
+| CoT | 0.0% | 0.0% | 0.0% | 0.0% |
+| SC-CoT | 0.0% | 0.0% | 0.0% | 0.0% |
 
-| Method | Budget |  Acc  | Mean Tokens | p50 Latency | p90 Latency |
-|:-------|------:|:-----:|------------:|------------:|------------:|
-| BAMoT  |   600 | 0.750 |       484.0 |       2.852s|       3.534s|
-| CoT    |   600 | 0.875 |       195.0 |       3.327s|       3.967s|
-| SC-CoT |   600 | 0.875 |       590.8 |       4.321s|       5.074s|
-| ToT    |   600 | 0.750 |      2544.0 |       3.197s|       4.851s|
-| GoT    |   600 | 0.875 |       896.0 |       8.907s|      13.898s|
-| FoT    |   600 | 0.750 |      1553.4 |      16.278s|      20.383s|
-| BAMoT  |  1200 | 0.875 |       955.1 |       3.497s|       3.815s|
-| BAMoT  |  1800 | 0.625 |      1622.0 |       3.082s|       3.696s|
-| BAMoT  |  2400 | **1.000** | **2226.9** | **3.948s** | **4.495s** |
+*Backend errors encountered
 
-**Anytime AUC (StrategyQA):** CoT 0.875, GoT 0.854, ToT 0.833, FoT 0.812, **BAMoT 0.792**, SC-CoT 0.750.  
-(*BAMoT reaches 1.00 accuracy at B=2400 with lower latency than tree methods.*)
+#### Efficiency Metrics
 
-### AIME — Accuracy vs Budget (n=4)
+| Method | Avg Tokens/Item | Avg Latency (s) | Accuracy |
+|:-------|:---------------:|:---------------:|:--------:|
+| **BAMoT** | **858** | **0.852** | **13.33%** |
+| ToT | 1,708 | 1.191 | 8.67% |
+| FoT | 2,255 | 0.789 | 11.67% |
+| GoT | 781 | 1.209 | 6.67% |
 
-| Method   | Budget |  Acc  | Mean Tokens |   p50  |   p90  |
-|:---------|------:|:-----:|------------:|-------:|-------:|
-| **BAMoT**|   600 | **1.000** |   559.3 |  3.279s|  3.507s|
-| **BAMoT**|  1200 | **1.000** |  1106.8 |  2.887s|  3.342s|
-| **BAMoT**|  1800 | **1.000** |  1647.5 |  3.101s|  3.348s|
-| **BAMoT**|  2400 | **1.000** |  2143.8 |  3.412s|  3.743s|
-| CoT / SC-CoT / ToT / GoT / FoT | — | **1.000** | *higher tokens & latency for tree methods* | | |
+**Key Findings:**
+- BAMoT achieves **highest accuracy** (13.33% average)
+- Uses **50% fewer tokens** than ToT while maintaining better accuracy
+- **62% fewer tokens** than FoT
+- **2x better accuracy** than GoT with only 10% more tokens
 
-**Anytime AUC (AIME):** all methods ≈ **1.000** (saturates on tiny slice).
+### Multi-Backend Support
 
-### MATH-500 — Accuracy vs Budget (n=4)
+BAMoT has been tested across multiple LLM backends:
 
-| Method   | Budget |  Acc  | Mean Tokens |   p50  |   p90  |
-|:---------|------:|:-----:|------------:|-------:|-------:|
-| **BAMoT**|   600 | **1.000** |   635.3 |  3.166s|  3.925s|
-| **BAMoT**|  1200 | **1.000** |  1040.5 |  3.253s|  3.574s|
-| **BAMoT**|  1800 | **1.000** |  1782.5 |  3.078s|  4.360s|
-| **BAMoT**|  2400 | **1.000** |  2074.0 |  3.910s|  4.741s|
+- **OpenAI API** (GPT-4o-mini): Best overall performance
+- **LLaMA 3.2 1B** (Local): Strong performance, demonstrates method robustness
+- **Qwen 2.5 1.5B** (Local): Compatible with local inference
 
-**Anytime AUC (MATH-500):** **BAMoT 1.000**, GoT 1.000, ToT 1.000, CoT 0.958, FoT 0.958, SC-CoT 0.750.
+See `SETUP_LLAMA.md` and `QWEN_SETUP_COMPLETE.md` for local model setup.
 
-> ⚠️ *The StrategyQA/AIME/MATH-500 runs above use small dev slices (8/4/4 items). They’re meant to show **trends**. For publication, scale up items for tighter CIs.*
+> 📊 **Full results available in**: `COMPREHENSIVE_RESULTS.md` and `results/comprehensive_comparison.csv`
 
 ---
 

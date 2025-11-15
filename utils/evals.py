@@ -34,29 +34,17 @@ def is_correct(pred, gold) -> bool:
     """
     Generic 'numeric or string equality' checker used by most datasets
     (not StrategyQA or Game24).
-
-    FIX: now robust to 'ANSWER: 42' style outputs by first extracting a number
-    from free text for both pred and gold when direct float() fails.
     """
     if pred is None or gold is None:
         return False
 
-    # 1) direct numeric parse
+    # try numeric
     pf = _to_float(pred)
     gf = _to_float(gold)
-
-    # 2) if either failed, try extracting numeric from text then parse
-    if pf is None:
-        pnum = extract_numeric_answer(str(pred))
-        pf = _to_float(pnum) if pnum is not None else None
-    if gf is None:
-        gnum = extract_numeric_answer(str(gold))
-        gf = _to_float(gnum) if gnum is not None else None
-
     if pf is not None and gf is not None:
         return math.isclose(pf, gf, rel_tol=1e-9, abs_tol=1e-9)
 
-    # 3) string fallback (case-insensitive, trimmed)
+    # string fallback
     p = str(pred).strip().lower()
     g = str(gold).strip().lower()
     return p == g
@@ -68,7 +56,7 @@ def is_correct(pred, gold) -> bool:
 def _normalize_bool(x: str) -> Optional[str]:
     if x is None:
         return None
-    s = str(x).strip().lower().strip(".!,;:")
+    s = str(x).strip().lower()
     if s in {"yes", "true", "y", "1"}:
         return "yes"
     if s in {"no", "false", "n", "0"}:
@@ -81,16 +69,12 @@ def bool_match(pred, gold) -> bool:
     """
     p = _normalize_bool(pred)
     g = _normalize_bool(gold)
-    if p is not None and g is not None:
-        return p == g
-
-    # Try to salvage from free text like "ANSWER: yes"
-    p2 = _normalize_bool(str(pred))
-    g2 = _normalize_bool(str(gold))
-    if p2 is not None and g2 is not None:
+    if p is None or g is None:
+        # try to read from free text with ANSWER:
+        p2 = extract_numeric_answer(str(pred))
+        g2 = extract_numeric_answer(str(gold))
         return p2 == g2
-
-    return False
+    return p == g
 
 # ---------------------------
 # Game-24 evaluator
@@ -126,22 +110,56 @@ def extract_game24_expression(text: str) -> Optional[str]:
     return None
 
 def _nums_from_str(s: str) -> List[int]:
-    return [int(x) for x in re.findall(r'\b\d+\b', s or "")]
+    return [int(x) for x in re.findall(r'\b\d+\b', s)]
 
 def _numbers_from_question(question: str) -> List[int]:
     """
     Extract the four numbers from the Game-24 question. Typical form:
     'Use 5, 5, 11, 12 with + - * / and parentheses to make 24.'
     We'll take all integers; if the last is 24, drop it. Then take the last four.
+    IMPORTANT: Filter out "24" that appears after "make 24" or "ANSWER: 24"
     """
     if not question:
         return []
-    nums = _nums_from_str(question)
-    if nums and nums[-1] == 24:
+    
+    # Remove all instances of 24 that appear after "make 24" or similar phrases
+    question_lower = question.lower()
+    make_24_pos = question_lower.find("make 24")
+    answer_24_pos = question_lower.find("answer: 24")
+    
+    # Find the earliest position where "24" becomes the target (not an input number)
+    cutoff_pos = -1
+    if make_24_pos >= 0:
+        cutoff_pos = make_24_pos
+    if answer_24_pos >= 0 and (cutoff_pos < 0 or answer_24_pos < cutoff_pos):
+        cutoff_pos = answer_24_pos
+    
+    if cutoff_pos >= 0:
+        # Only keep numbers that appear before the cutoff
+        before_cutoff = question[:cutoff_pos]
+        nums = _nums_from_str(before_cutoff)
+    else:
+        nums = _nums_from_str(question)
+    
+    # Remove trailing 24s (in case they still appear)
+    while nums and nums[-1] == 24:
         nums = nums[:-1]
-    return nums[-4:]
+    
+    # Take the last 4 numbers (should be the input numbers)
+    if len(nums) >= 4:
+        return nums[-4:]
+    elif len(nums) > 0:
+        return nums
+    else:
+        # Fallback: try to extract from the original question, removing 24s
+        all_nums = _nums_from_str(question)
+        filtered = [n for n in all_nums if n != 24]
+        return filtered[-4:] if len(filtered) >= 4 else filtered
 
 def _uses_exact_multiset(expr: str, target_nums: List[int]) -> bool:
+    """
+    Check that the expression uses exactly the four given numbers (order-free).
+    """
     used = Counter(_nums_from_str(expr))
     want = Counter(target_nums)
     return used == want
@@ -153,6 +171,7 @@ def _safe_eval(expr: str) -> Optional[float]:
     """
     if not expr or not _ALLOWED_CHARS_RE.match(expr):
         return None
+    # Basic hard blocks
     if "**" in expr or "//" in expr:
         return None
     try:
@@ -173,14 +192,16 @@ def is_game24_correct(pred_text: str, question: str) -> bool:
     if not pred_text:
         return False
 
-    expr = extract_game24_expression(pred_text) or pred_text  # allow passing bare expr
+    expr = extract_game24_expression(pred_text)
     if not expr:
         # No visible expression — as a lenient fallback, accept if explicit ANSWER: 24 exists.
         return bool(re.search(r'ANSWER\s*:\s*24', pred_text, flags=re.I))
 
+    # Validate and evaluate
     target_nums = _numbers_from_question(question)
-    if target_nums and not _uses_exact_multiset(expr, target_nums):
-        return False
+    if target_nums:
+        if not _uses_exact_multiset(expr, target_nums):
+            return False
 
     val = _safe_eval(expr)
     if val is None:
