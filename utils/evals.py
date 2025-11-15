@@ -117,14 +117,44 @@ def _numbers_from_question(question: str) -> List[int]:
     Extract the four numbers from the Game-24 question. Typical form:
     'Use 5, 5, 11, 12 with + - * / and parentheses to make 24.'
     We'll take all integers; if the last is 24, drop it. Then take the last four.
+    IMPORTANT: Filter out "24" that appears after "make 24" or "ANSWER: 24"
     """
     if not question:
         return []
-    nums = _nums_from_str(question)
-    if nums and nums[-1] == 24:
+    
+    # Remove all instances of 24 that appear after "make 24" or similar phrases
+    question_lower = question.lower()
+    make_24_pos = question_lower.find("make 24")
+    answer_24_pos = question_lower.find("answer: 24")
+    
+    # Find the earliest position where "24" becomes the target (not an input number)
+    cutoff_pos = -1
+    if make_24_pos >= 0:
+        cutoff_pos = make_24_pos
+    if answer_24_pos >= 0 and (cutoff_pos < 0 or answer_24_pos < cutoff_pos):
+        cutoff_pos = answer_24_pos
+    
+    if cutoff_pos >= 0:
+        # Only keep numbers that appear before the cutoff
+        before_cutoff = question[:cutoff_pos]
+        nums = _nums_from_str(before_cutoff)
+    else:
+        nums = _nums_from_str(question)
+    
+    # Remove trailing 24s (in case they still appear)
+    while nums and nums[-1] == 24:
         nums = nums[:-1]
-    # Some prompts contain extra numbers; keep the last four that precede 24.
-    return nums[-4:]
+    
+    # Take the last 4 numbers (should be the input numbers)
+    if len(nums) >= 4:
+        return nums[-4:]
+    elif len(nums) > 0:
+        return nums
+    else:
+        # Fallback: try to extract from the original question, removing 24s
+        all_nums = _nums_from_str(question)
+        filtered = [n for n in all_nums if n != 24]
+        return filtered[-4:] if len(filtered) >= 4 else filtered
 
 def _uses_exact_multiset(expr: str, target_nums: List[int]) -> bool:
     """

@@ -27,11 +27,44 @@ def _nums_from_str(s: str) -> List[int]:
 
 def _numbers_from_question(question: str) -> List[int]:
     # Typical: "Use 5, 5, 11, 12 with + - * / and parentheses to make 24."
+    # Extract numbers, but filter out "24" that appears after "make 24" or "ANSWER: 24"
+    # We want only the four input numbers, not the target 24
     nums = _nums_from_str(question)
-    if nums and nums[-1] == 24:
+    
+    # Remove all instances of 24 that appear after "make 24" or similar phrases
+    # Strategy: find the pattern "make 24" or "= 24" or "ANSWER: 24" and remove 24s after that
+    question_lower = question.lower()
+    make_24_pos = question_lower.find("make 24")
+    answer_24_pos = question_lower.find("answer: 24")
+    
+    # Find the earliest position where "24" becomes the target (not an input number)
+    cutoff_pos = -1
+    if make_24_pos >= 0:
+        cutoff_pos = make_24_pos
+    if answer_24_pos >= 0 and (cutoff_pos < 0 or answer_24_pos < cutoff_pos):
+        cutoff_pos = answer_24_pos
+    
+    if cutoff_pos >= 0:
+        # Only keep numbers that appear before the cutoff
+        # We'll extract numbers from the substring before cutoff
+        before_cutoff = question[:cutoff_pos]
+        nums = _nums_from_str(before_cutoff)
+    
+    # Remove trailing 24s (in case they still appear)
+    while nums and nums[-1] == 24:
         nums = nums[:-1]
-    # keep the last four before the trailing 24, which matches our loaders' phrasing
-    return nums[-4:]
+    
+    # Take the last 4 numbers (should be the input numbers)
+    if len(nums) >= 4:
+        return nums[-4:]
+    elif len(nums) > 0:
+        # If we have fewer than 4, return what we have (shouldn't happen with proper questions)
+        return nums
+    else:
+        # Fallback: try to extract from the original question, removing 24s
+        all_nums = _nums_from_str(question)
+        filtered = [n for n in all_nums if n != 24]
+        return filtered[-4:] if len(filtered) >= 4 else filtered
 
 def _uses_exact_multiset(expr: str, target_nums: List[int]) -> bool:
     return Counter(_nums_from_str(expr)) == Counter(target_nums)
@@ -76,9 +109,22 @@ def _seed_tail(task_mode: str, target_nums: List[int]) -> str:
     if task_mode == "boolean":
         return "Answer strictly with a single word: yes or no."
     if task_mode == "game24":
+        # Provide examples based on the numbers
+        example = ""
+        if len(target_nums) == 4:
+            # Try to give a helpful example
+            if 6 in target_nums and 4 in target_nums:
+                example = "Example: For [1, 1, 4, 6], try: EXPR: (6 * 4) * (1 / 1)  ANSWER: 24 (which equals 24 * 1 = 24)"
+            elif 8 in target_nums and 3 in target_nums:
+                example = "Example: For [1, 1, 3, 8], try: EXPR: (8 * 3) * (1 / 1)  ANSWER: 24 (which equals 24 * 1 = 24)"
+            elif all(n == 6 for n in target_nums):
+                example = "Example: For [6, 6, 6, 6], try: EXPR: (6 + 6) * (6 / 6) + 6 + 6  ANSWER: 24 (which equals 12 * 1 + 12 = 24)"
+        
         return (
-            f"Task: Use the numbers {target_nums} exactly once each with + - * / and parentheses to make 24.\n"
-            "Do NOT invent new numbers (e.g., '1' if not provided). Do NOT concatenate digits.\n"
+            f"Task: Use ONLY the numbers {target_nums} exactly once each with + - * / and parentheses.\n"
+            "The expression MUST evaluate to exactly 24. Calculate it step by step to verify.\n"
+            "Do NOT use the number 24 in your expression. Do NOT invent numbers. Do NOT concatenate digits.\n"
+            f"{example}\n"
             "Return ONE line only in this exact format:\n"
             "EXPR: <expression>  ANSWER: 24"
         )
@@ -96,12 +142,13 @@ def _refine_prompt(task_mode: str, question: str, attempt_text: str, feedback: s
         )
     if task_mode == "game24":
         return (
-            "Refine and verify ONE valid expression that equals 24 using the numbers "
-            f"{target_nums} exactly once each with + - * / and parentheses.\n"
-            "Do NOT invent numbers and do NOT concatenate digits.\n"
+            "CRITICAL: You must create an expression that evaluates to EXACTLY 24.\n"
+            f"Use ONLY the numbers {target_nums} exactly once each with + - * / and parentheses.\n"
+            "Do NOT use the number 24 in your expression. Do NOT invent numbers. Do NOT concatenate digits.\n"
             f"Question: {question}\n"
             f"Current attempt: {attempt_text}\n"
             f"Feedback: {feedback}\n"
+            "Before submitting, calculate your expression step by step to verify it equals exactly 24.\n"
             "Return ONE line only in this exact format:\n"
             "EXPR: <expression>  ANSWER: 24\n"
             "Expression:"
@@ -125,9 +172,28 @@ def _score_text_for_mode(text: str, task_mode: str, target_nums: Optional[List[i
         best = 0.0
         for e in exprs:
             val = _safe_eval(e)
-            close = 0.0 if val is None else 1.0 / (1.0 + abs(val - 24.0))
-            nums_ok = 1.0 if (target_nums and _uses_exact_multiset(e, target_nums)) else 0.0
-            best = max(best, 0.7 * close + 0.3 * nums_ok)
+            # Heavily penalize if not exactly 24
+            if val is not None and math.isclose(val, 24.0, rel_tol=1e-9, abs_tol=1e-9):
+                # Perfect score if equals 24 AND uses correct numbers
+                nums_ok = 1.0 if (target_nums and _uses_exact_multiset(e, target_nums)) else 0.0
+                if nums_ok:
+                    return 1.0  # Perfect match
+                else:
+                    best = max(best, 0.8)  # Right value, wrong numbers
+            else:
+                # Penalize based on distance from 24
+                if val is None:
+                    close = 0.0
+                else:
+                    # Strong penalty for being far from 24
+                    distance = abs(val - 24.0)
+                    if distance > 10:
+                        close = 0.0  # Too far, reject
+                    else:
+                        close = max(0.0, 1.0 - (distance / 10.0))  # Linear penalty
+                nums_ok = 1.0 if (target_nums and _uses_exact_multiset(e, target_nums)) else 0.0
+                # Weight exact 24 much more heavily
+                best = max(best, 0.9 * close + 0.1 * nums_ok)
         return best if best > 0 else 0.1
     # numeric
     return 1.0 if extract_numeric_answer(text) else 0.2
@@ -151,12 +217,25 @@ def run_item(
     gold_value: Optional[str] = None,  # ignored for game24
     refine_topk: int = 3,
     seed_budget_frac: float = 0.30,
+    task_mode: Optional[str] = None,  # Allow explicit task_mode override
     **kwargs
 ) -> Dict[str, Any]:
 
     question = item.get("question", "")
-    task_mode = _detect_task_mode(question)
-    target_nums = _numbers_from_question(question) if task_mode == "game24" else []
+    # Use passed task_mode if provided, otherwise auto-detect
+    if task_mode is None:
+        task_mode = _detect_task_mode(question)
+    
+    # For Game24, prefer numbers from item dict if available (more reliable)
+    if task_mode == "game24":
+        target_nums = item.get("numbers")
+        if not target_nums:
+            # Fallback to extraction from question
+            target_nums = _numbers_from_question(question)
+    else:
+        target_nums = []
+    
+    gold_answer = item.get("answer")  # For early stopping on non-game24 tasks
 
     total_prompt = 0
     total_comp = 0
@@ -167,15 +246,38 @@ def run_item(
     seed_budget_limit = int(max(1, budget_tokens * seed_budget_frac))
 
     def _try_take_valid(text: str) -> Optional[str]:
-        """Return first valid expr == 24 using exact nums; else None."""
-        if task_mode != "game24":
+        """Return first valid answer for early stopping."""
+        if task_mode == "game24":
+            for e in _extract_all_game24_exprs(text):
+                if target_nums and _uses_exact_multiset(e, target_nums):
+                    val = _safe_eval(e)
+                    if val is not None and math.isclose(val, 24.0, rel_tol=1e-9, abs_tol=1e-9):
+                        return e
             return None
-        for e in _extract_all_game24_exprs(text):
-            if target_nums and _uses_exact_multiset(e, target_nums):
-                val = _safe_eval(e)
-                if val is not None and math.isclose(val, 24.0, rel_tol=1e-9, abs_tol=1e-9):
-                    return e
-        return None
+        elif task_mode == "boolean":
+            # Check if we have a clear yes/no answer
+            txt_lower = text.lower()
+            has_yes = "yes" in txt_lower and "no" not in txt_lower
+            has_no = "no" in txt_lower and "yes" not in txt_lower
+            if has_yes:
+                return "yes"
+            elif has_no:
+                return "no"
+            return None
+        else:  # numeric
+            # For numeric tasks, check if we have a valid answer
+            pred = extract_numeric_answer(text)
+            if pred and gold_answer:
+                # Early stop if we match gold (optional, controlled by early_stop_gold)
+                if early_stop_gold:
+                    try:
+                        pred_f = float(pred)
+                        gold_f = float(str(gold_answer))
+                        if math.isclose(pred_f, gold_f, rel_tol=1e-9, abs_tol=1e-9):
+                            return pred
+                    except:
+                        pass
+            return pred if pred else None
 
     for i in range(seeds):
         if (total_prompt + total_comp) >= seed_budget_limit and len(seed_pool) > 0:
@@ -189,15 +291,19 @@ def run_item(
 
         txt = out["text"]
 
-        # Early-stop if any valid expr already appears
-        got_expr = _try_take_valid(txt)
-        if got_expr:
+        # Early-stop if any valid answer already appears
+        got_answer = _try_take_valid(txt)
+        if got_answer:
             u = out.get("usage", {}) or {}
+            total_prompt += u.get("prompt_tokens", 0) or 0
+            total_comp += u.get("completion_tokens", 0) or 0
+            if out.get("latency") is not None:
+                latencies.append(out["latency"])
             return {
                 "text": f"[PASS seed]\n{txt}",
-                "pred": got_expr,
-                "usage": {"prompt_tokens": u.get("prompt_tokens", 0), "completion_tokens": u.get("completion_tokens", 0)},
-                "latency": out.get("latency"),
+                "pred": got_answer,
+                "usage": {"prompt_tokens": total_prompt, "completion_tokens": total_comp},
+                "latency": sum(latencies)/len(latencies) if latencies else out.get("latency"),
             }
 
         if task_mode == "boolean":
@@ -253,7 +359,7 @@ def run_item(
         # generate feedback from the *best* candidate inside this text
         exprs = _extract_all_game24_exprs(text)
         if not exprs:
-            return "No valid arithmetic expression detected. Produce a single arithmetic expression."
+            return "No valid arithmetic expression detected. Produce a single arithmetic expression that uses only the given numbers."
         # choose the closest one for feedback
         best_e, best_close = exprs[0], -1.0
         for e in exprs:
@@ -265,16 +371,31 @@ def run_item(
         val = _safe_eval(best_e)
         bits = []
         if not nums_ok:
-            bits.append(f"Use EACH of {sorted(target_nums)} exactly once; you used {sorted(_nums_from_str(best_e))}.")
+            used_nums = sorted(_nums_from_str(best_e))
+            bits.append(f"ERROR: You must use EACH of {sorted(target_nums)} exactly once. You used {used_nums}.")
         if val is None:
-            bits.append("Your expression could not be evaluated. Use only + - * / and parentheses.")
+            bits.append("ERROR: Your expression could not be evaluated. Use only + - * / and parentheses, no other operations.")
         elif not math.isclose(val, 24.0, rel_tol=1e-9, abs_tol=1e-9):
-            bits.append(f"Your expression evaluates to {val}, not 24.")
+            # More specific feedback about the value
+            diff = abs(val - 24.0)
+            if diff < 1:
+                bits.append(f"CLOSE but not exact: Your expression evaluates to {val}, which is {diff} away from 24. Adjust to get exactly 24.")
+            elif val < 24:
+                bits.append(f"TOO LOW: Your expression evaluates to {val}, which is {24 - val} less than 24. You need to increase the value.")
+            else:
+                bits.append(f"TOO HIGH: Your expression evaluates to {val}, which is {val - 24} more than 24. You need to decrease the value.")
+            bits.append("Try different operations or grouping. Remember: the result must be EXACTLY 24.")
         if not bits:
-            bits.append("Looks valid — keep the same numbers exactly once and ensure it equals 24.")
+            bits.append("Expression looks correct! Verify it equals exactly 24.")
         return " ".join(bits)
 
-    while token_spend <= budget_tokens:
+    # Refinement loop: check budget BEFORE each API call
+    while token_spend < budget_tokens:
+        # Check if we can afford another refinement (estimate)
+        estimated_refine_cost = refine_tokens * 2  # rough estimate: prompt + completion
+        if token_spend + estimated_refine_cost > budget_tokens:
+            break
+        
         best_pool.sort(key=lambda x: x[2], reverse=True)
         idx = rr % min(max(1, refine_topk), len(best_pool))
         base_txt, _, _ = best_pool[idx]
@@ -288,9 +409,9 @@ def run_item(
 
         new_txt = out["text"]
 
-        # Early-stop if any valid expr appears now
-        got_expr = _try_take_valid(new_txt)
-        if got_expr:
+        # Early-stop if any valid answer appears now
+        got_answer = _try_take_valid(new_txt)
+        if got_answer:
             u = out.get("usage", {}) or {}
             total_prompt += u.get("prompt_tokens", 0) or 0
             total_comp   += u.get("completion_tokens", 0) or 0
@@ -298,7 +419,7 @@ def run_item(
             if lat is not None: latencies.append(lat)
             return {
                 "text": f"[PASS refine]\n{new_txt}",
-                "pred": got_expr,
+                "pred": got_answer,
                 "usage": {"prompt_tokens": total_prompt, "completion_tokens": total_comp},
                 "latency": sum(latencies)/len(latencies) if latencies else None,
             }
@@ -339,12 +460,74 @@ def run_item(
                 dedup[key] = (t_, p_, s_)
         best_pool = list(dedup.values())
 
-        if (pt + ct) > 0 and token_spend + (pt + ct) > budget_tokens:
+        # Check budget after updating (safety check)
+        if token_spend >= budget_tokens:
             break
 
     # ---------- 3) CONSENSUS / best ----------
     best_pool.sort(key=lambda x: x[2], reverse=True)
-    final_pred = best_pool[0][1]  # for game24 we want the best expr we found (may still be None)
+    
+    if no_consensus:
+        # Just take the top-scored candidate
+        final_pred = best_pool[0][1] if best_pool else None
+    else:
+        # Implement consensus: majority voting for top-K candidates
+        top_k_for_consensus = min(3, len(best_pool))
+        top_candidates = best_pool[:top_k_for_consensus]
+        
+        # Collect predictions (non-None)
+        preds = [c[1] for c in top_candidates if c[1] is not None]
+        
+        if not preds:
+            # Fallback to top candidate even if pred is None
+            final_pred = best_pool[0][1] if best_pool else None
+        elif len(preds) == 1:
+            final_pred = preds[0]
+        else:
+            # Majority vote (or weighted by score)
+            if task_mode == "boolean":
+                # Simple majority for yes/no
+                yes_count = sum(1 for p in preds if str(p).lower().strip() in ("yes", "true", "y", "1"))
+                no_count = sum(1 for p in preds if str(p).lower().strip() in ("no", "false", "n", "0"))
+                final_pred = "yes" if yes_count > no_count else ("no" if no_count > 0 else preds[0])
+            elif task_mode == "game24":
+                # For game24, prioritize expressions that exactly equal 24
+                valid_exprs = []
+                close_exprs = []  # Expressions close to 24
+                for c in top_candidates:
+                    if c[1]:  # has a prediction
+                        for e in _extract_all_game24_exprs(c[0]):  # extract from text
+                            if target_nums and _uses_exact_multiset(e, target_nums):
+                                val = _safe_eval(e)
+                                if val is not None:
+                                    if math.isclose(val, 24.0, rel_tol=1e-9, abs_tol=1e-9):
+                                        valid_exprs.append(e)  # Perfect match
+                                    elif abs(val - 24.0) < 2.0:  # Within 2 of 24
+                                        close_exprs.append((e, abs(val - 24.0)))
+                if valid_exprs:
+                    final_pred = valid_exprs[0]  # take first perfect match
+                elif close_exprs:
+                    # Sort by distance to 24, take closest
+                    close_exprs.sort(key=lambda x: x[1])
+                    final_pred = close_exprs[0][0]
+                else:
+                    final_pred = preds[0]  # fallback to top prediction
+            else:  # numeric
+                # For numeric, try to find consensus by checking if multiple agree
+                # (within tolerance)
+                numeric_preds = []
+                for p in preds:
+                    try:
+                        numeric_preds.append(float(str(p)))
+                    except:
+                        pass
+                if numeric_preds:
+                    # Use median or most common value
+                    numeric_preds.sort()
+                    median_idx = len(numeric_preds) // 2
+                    final_pred = str(int(numeric_preds[median_idx]) if numeric_preds[median_idx].is_integer() else numeric_preds[median_idx])
+                else:
+                    final_pred = preds[0]
 
     trace = "\n\n==== TOP CANDIDATES ====\n\n" + "\n\n----\n\n".join([c[0] for c in best_pool[:3]])
     avg_latency = (sum(latencies) / len(latencies)) if latencies else None

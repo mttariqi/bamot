@@ -91,7 +91,14 @@ def main():
     ap.add_argument("--random_seed", type=int, default=42, help="RNG seed for --shuffle.")
 
     # model settings
-    ap.add_argument("--model", default="gpt-4o-mini")
+    ap.add_argument("--model", default="gpt-4o-mini",
+                    help="Model identifier (OpenAI name, llama label, etc.)")
+    ap.add_argument("--backend", choices=["openai", "llama_cpp"], default="openai",
+                    help="LLM backend to use. 'openai' (default) or 'llama_cpp' for local LLaMA models.")
+    ap.add_argument("--llama_model_path", type=str, default=os.getenv("LLAMA_MODEL_PATH", ""),
+                    help="Path to GGUF/GGML model for llama_cpp backend (or set LLAMA_MODEL_PATH).")
+    ap.add_argument("--llama_ctx", type=int, default=4096, help="Context window for llama_cpp backend.")
+    ap.add_argument("--llama_threads", type=int, default=None, help="CPU threads for llama_cpp backend.")
     ap.add_argument("--temperature", type=float, default=0.2)
     ap.add_argument("--max_tokens", type=int, default=512)
 
@@ -157,7 +164,15 @@ def main():
 
     # --- model gateway & method ---
     # --- model gateway & method ---
-    gw = ModelGateway(model=args.model, temperature=args.temperature, max_tokens=args.max_tokens)
+    gw = ModelGateway(
+        model=args.model,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        backend=args.backend,
+        llama_model_path=args.llama_model_path,
+        llama_ctx=args.llama_ctx,
+        llama_threads=args.llama_threads,
+    )
 
     # dataset-specific system prompt
     if args.dataset == "strategyqa":
@@ -236,13 +251,13 @@ def main():
 
 
             elif args.method == "tot":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, branch=args.tot_branch, depth=args.tot_depth, budget_tokens=args.budget_tokens)
+                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, branch=args.tot_branch, depth=args.tot_depth)
 
             elif args.method == "got":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, steps=args.got_steps, beam=args.got_beam,budget_tokens=args.budget_tokens)
+                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, steps=args.got_steps, beam=args.got_beam)
 
             elif args.method == "fot":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, trees=args.fot_trees, branch=args.fot_branch, depth=args.fot_depth,budget_tokens=args.budget_tokens)
+                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, trees=args.fot_trees, branch=args.fot_branch, depth=args.fot_depth)
 
             else:  # "cot"
                 out = run_fn(item_for_method, gateway=gw, cot_system=cot_system)

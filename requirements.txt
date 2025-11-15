@@ -3,3 +3,6 @@ tiktoken>=0.7.0
 pandas>=2.2.2
 tqdm>=4.66.4
 matplotlib>=3.8.0
+# Optional: llama-cpp-python (for local LLaMA models)
+# Install with: pip install llama-cpp-python
+# For Apple Silicon: CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
