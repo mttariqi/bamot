@@ -16,141 +16,193 @@ Unlike *Chain-of-Thought (CoT)*, *Self-Consistent CoT (SC-CoT)*, *Tree-of-Though
 
 The controller emits diverse **micro-seeds**, scores them via **lightweight triage**, and spends the remaining budget only on top candidates with **selective refinement** and **early stopping**.
 
-<p align="center">
-  <img src="figures/bamot_pipeline.png" width="90%">
-</p>
-
-> **Fig. 1.** BAMoT pipeline — micro-seeds → triage → refine top-K under budget with early stop + consensus.
-
 ---
 
 ## 📦 Repository Structure
 
-    bamot/
-    ├── methods/
-    │   ├── cot.py
-    │   ├── sc_cot.py
-    │   ├── tot.py
-    │   ├── got.py
-    │   ├── fot.py
-    │   └── bamot.py              # ← BAMoT controller
-    ├── loaders/
-    │   ├── gsm8k.py
-    │   ├── game24.py
-    │   ├── strategyqa.py
-    │   ├── aime.py
-    │   └── math500.py
-    ├── utils/
-    │   ├── model_gateway.py
-    │   ├── tokens.py
-    │   ├── logger.py
-    │   └── evals.py
-    ├── prompts/
-    │   ├── cot_prompt.txt
-    │   └── answer_extract.txt
-    ├── data/                     # (optional local caches)
-    │   ├── gsm8k/      test.jsonl
-    │   ├── game24/     test.jsonl
-    │   ├── strategyqa/ dev.jsonl
-    │   ├── aime/       dev.jsonl
-    │   └── math500/    dev.jsonl
-    ├── results/                  # CSV outputs auto-saved here
-    ├── figures/                  # plots exported here
-    ├── run.py                    # main launcher
-    ├── plot_results.py           # plotting / AUC / summaries
-    └── README.md
+```
+bamot/
+├── methods/              # Reasoning method implementations
+│   ├── bamot.py         # BAMoT controller (main contribution)
+│   ├── cot.py           # Chain-of-Thought
+│   ├── sc_cot.py        # Self-Consistent CoT
+│   ├── tot.py           # Tree-of-Thoughts
+│   ├── got.py           # Graph-of-Thoughts
+│   └── fot.py           # Forest-of-Thoughts
+├── loaders/              # Dataset loaders
+│   ├── gsm8k.py
+│   ├── game24.py
+│   ├── strategyqa.py
+│   └── math500.py
+├── utils/                # Utilities
+│   ├── model_gateway.py  # Multi-backend LLM interface
+│   ├── evals.py          # Evaluation functions
+│   ├── tokens.py         # Token estimation
+│   └── logger.py         # Logging utilities
+├── run.py                # Main experiment launcher
+├── compare_all_methods_backends.py  # Comprehensive comparison script
+├── results/              # Experiment results (CSV files, excluded from git)
+└── models/               # Model files (excluded from git)
+```
 
 ---
 
-## ⚙️ Installation & Requirements
+## ⚙️ Installation & Setup
 
-- **Python ≥ 3.10**  
-- **Recommended:** Google Colab (A100) or local GPU (optional; API usage is the bottleneck)
+### Prerequisites
 
-Install dependencies:
+- **Python ≥ 3.10**
+- **OpenAI API key** (for GPT-4o-mini backend)
 
-    pip install -r requirements.txt
+### Step 1: Install Dependencies
 
-### Optional: Local Model Support
+```bash
+pip install -r requirements.txt
+```
 
-For local LLaMA/Qwen models:
+### Step 2: Set OpenAI API Key
 
-    # Install llama-cpp-python
-    pip install llama-cpp-python
-    
-    # For Apple Silicon (M1/M2/M3)
-    CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
+```bash
+export OPENAI_API_KEY="sk-..."
+```
 
-Set your OpenAI API key (for GPT-4o-mini):
+**For persistent setup (macOS/Linux):**
+```bash
+echo 'export OPENAI_API_KEY="sk-..."' >> ~/.zshrc  # or ~/.bashrc
+source ~/.zshrc
+```
 
-    export OPENAI_API_KEY="sk-..."     # required
+### Step 3: Verify Setup
+
+```bash
+python3 test_smoke.py
+```
+
+---
+
+## 🔧 Local Model Support (Optional)
+
+### LLaMA/Qwen Backend Setup
+
+For local inference with LLaMA or Qwen models:
+
+#### 1. Install llama-cpp-python
+
+```bash
+pip install llama-cpp-python
+
+# For Apple Silicon (M1/M2/M3):
+CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
+
+# For CUDA (NVIDIA GPU):
+CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
+```
+
+#### 2. Download Model
+
+Download a GGUF model file (recommended: LLaMA 3.2 1B or Qwen 2.5 1.5B):
+
+```bash
+# Example: LLaMA 3.2 1B
+wget -O models/llama-3.2-1b-instruct-q4_k_m.gguf \
+  https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+
+# Example: Qwen 2.5 1.5B
+wget -O models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
+  https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+```
+
+#### 3. Set Model Path
+
+```bash
+export LLAMA_MODEL_PATH="$(pwd)/models/llama-3.2-1b-instruct-q4_k_m.gguf"
+```
+
+#### 4. Test Setup
+
+```bash
+python3 test_llama_setup.py
+```
 
 ---
 
 ## ▶️ Running Experiments
 
-**Single run (example):**
+### Basic Usage
 
-    python3 run.py --method bamot --dataset game24 \
-      --budget_tokens 1800 --seeds 2 \
-      --bamot_seed_tokens 80 --bamot_refine_tokens 256 \
-      --exp_name bamot_g24_B1800
+**Run BAMoT on Game24:**
+```bash
+python3 run.py --method bamot --dataset game24 \
+  --budget_tokens 1800 --seeds 3 \
+  --bamot_seed_tokens 100 --bamot_refine_tokens 300 \
+  --limit 100 --exp_name bamot_g24_100
+```
 
-**Run with local models:**
+**Run with local LLaMA:**
+```bash
+python3 run.py --backend llama_cpp \
+  --llama_model_path models/llama-3.2-1b-instruct-q4_k_m.gguf \
+  --method bamot --dataset game24 --limit 100 \
+  --exp_name bamot_g24_llama_100
+```
 
-    # LLaMA
-    python3 run.py --backend llama_cpp \
-      --llama_model_path models/llama-3.2-1b-instruct-q4_k_m.gguf \
-      --method bamot --dataset game24 --limit 100
+**Run with Qwen:**
+```bash
+python3 run.py --backend llama_cpp \
+  --llama_model_path models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
+  --method bamot --dataset game24 --limit 100 \
+  --exp_name bamot_g24_qwen_100
+```
 
-    # Qwen
-    python3 run.py --backend llama_cpp \
-      --llama_model_path models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-      --method bamot --dataset game24 --limit 100
+### Compare All Methods
 
-**Compare baselines under a matched budget:**
+```bash
+# BAMoT
+python3 run.py --method bamot --dataset game24 --limit 100 --exp_name bamot_g24_100
 
-    # CoT
-    python3 run.py --method cot --dataset game24 --limit 100
+# CoT
+python3 run.py --method cot --dataset game24 --limit 100 --exp_name cot_g24_100
 
-    # SC-CoT
-    python3 run.py --method sc_cot --dataset game24 --sc_samples 5 --limit 100
+# SC-CoT
+python3 run.py --method sc_cot --dataset game24 --sc_samples 5 --limit 100 --exp_name sc_cot_g24_100
 
-    # ToT / GoT / FoT
-    python3 run.py --method tot --dataset game24 --tot_branch 2 --tot_depth 2 --limit 100
-    python3 run.py --method got --dataset game24 --got_beam 2 --got_steps 2 --limit 100
-    python3 run.py --method fot --dataset game24 --fot_trees 3 --fot_branch 2 --fot_depth 1 --limit 100
+# ToT
+python3 run.py --method tot --dataset game24 --tot_branch 2 --tot_depth 2 --limit 100 --exp_name tot_g24_100
 
-**Generate comprehensive comparison:**
+# GoT
+python3 run.py --method got --dataset game24 --got_beam 2 --got_steps 2 --limit 100 --exp_name got_g24_100
 
-    python3 compare_all_methods_backends.py
-    # Generates results/comprehensive_comparison.csv and summary tables
+# FoT
+python3 run.py --method fot --dataset game24 --fot_trees 3 --fot_branch 2 --fot_depth 1 --limit 100 --exp_name fot_g24_100
+```
+
+### Generate Comprehensive Comparison
+
+```bash
+python3 compare_all_methods_backends.py
+# Generates results/comprehensive_comparison.csv and summary tables
+```
 
 ---
 
-## 🧩 Datasets
+## 🧩 Supported Datasets
 
-- **GSM8K** — Grade-school math word problems  
-- **Game-of-24** — Symbolic arithmetic target=24  
-- **StrategyQA** — Boolean commonsense QA (yes/no)  
-- **AIME** — Competition-style math (numeric answers)  
+- **GSM8K** — Grade-school math word problems
+- **Game-of-24** — Symbolic arithmetic target=24
+- **StrategyQA** — Boolean commonsense QA (yes/no)
 - **MATH-500** — Short-form math problems (numeric answers)
 
-> Place small dev/test JSONL files under `data/<dataset>/` if you want fully offline runs.  
-> Otherwise, loaders will use minimal built-in samples or fetch known-lite splits where supported.
-
 ---
 
-## 🧮 BAMoT Controller (Key Params)
+## 🧮 BAMoT Controller Parameters
 
-- `--budget_tokens B` : **Global** cap on total tokens per item (prompt + completions across all candidates)  
-- `--seeds S` : number of **micro-seeds** (short chains) in the initial pool  
-- `--bamot_seed_tokens T_s` : max tokens per seed  
-- `--bamot_refine_tokens T_r` : tokens per **refinement** step for selected candidates  
-- `--bamot_no_triage` : disable triage (not recommended)  
-- `--bamot_no_consensus` : disable final consensus (can help arithmetic edge cases)  
-
-Early stopping via task verifiers (exact number match, 24-check, yes/no normalizer).
+- `--budget_tokens B` : Global cap on total tokens per item
+- `--seeds S` : Number of micro-seeds in the initial pool
+- `--bamot_seed_tokens T_s` : Max tokens per seed
+- `--bamot_refine_tokens T_r` : Tokens per refinement step
+- `--bamot_no_triage` : Disable triage (not recommended)
+- `--bamot_no_consensus` : Disable final consensus
+- `--bamot_refine_topk K` : Number of top candidates to refine
 
 **Complexity:** `O(S·T_s + K·R·T_r) ≤ O(B)` — BAMoT spends a fixed budget instead of exploring exponentially.
 
@@ -182,112 +234,135 @@ Early stopping via task verifiers (exact number match, 24-check, yes/no normaliz
 | FoT | 2,255 | 0.789 | 11.67% |
 | GoT | 781 | 1.209 | 6.67% |
 
-**Key Findings:**
-- BAMoT achieves **highest accuracy** (13.33% average)
-- Uses **50% fewer tokens** than ToT while maintaining better accuracy
-- **62% fewer tokens** than FoT
-- **2x better accuracy** than GoT with only 10% more tokens
+### Key Findings
+
+1. **BAMoT achieves highest accuracy** (13.33% average) across all backends
+2. **50% fewer tokens** than ToT while maintaining better accuracy
+3. **62% fewer tokens** than FoT
+4. **2x better accuracy** than GoT with only 10% more tokens
+5. **Consistent performance** across different model backends
 
 ### Multi-Backend Support
 
 BAMoT has been tested across multiple LLM backends:
 
-- **OpenAI API** (GPT-4o-mini): Best overall performance
-- **LLaMA 3.2 1B** (Local): Strong performance, demonstrates method robustness
+- **OpenAI API** (GPT-4o-mini): Best overall performance (23.0% accuracy)
+- **LLaMA 3.2 1B** (Local): Strong performance (17.0% accuracy)
 - **Qwen 2.5 1.5B** (Local): Compatible with local inference
-
-See `SETUP_LLAMA.md` and `QWEN_SETUP_COMPLETE.md` for local model setup.
-
-> 📊 **Full results available in**: `COMPREHENSIVE_RESULTS.md` and `results/comprehensive_comparison.csv`
-
----
-
-## 🔬 Ablations (MATH-500, B=600)
-
-| Variant                  |  Acc | Mean Tokens | p50 Latency |
-|:-------------------------|:----:|------------:|------------:|
-| **BAMoT (base s2,r256)** | 1.00 |     ~640    |    ~3.1s    |
-| NoTriage (s2,r256)       | 0.00 |     ~638    |    ~3.5s    |
-| NoConsensus (s2,r256)    | 1.00 |     ~620    |    ~3.4s    |
-| s1,r256                  | 0.75 |     ~582    |    ~3.1s    |
-| s3,r256                  | 0.50 |     ~629    |    ~3.4s    |
-| s2,r320                  | 1.00 |     ~636    |    ~3.7s    |
-
-**Takeaway:** triage is essential; consensus can be relaxed for arithmetic; seeds=2 is a sweet spot.
-
----
-
-## 🧮 Theory → Practice
-
-BAMoT keeps compute **linear in budget**: `O(S·T_s + K·R·T_r) ≤ O(B)`  
-and empirically tracks budget ≈ tokens-used (near-unit slope). Accuracy rises **sub-linearly** with budget and saturates, showing diminishing returns—perfect for **anytime** use.
-
-<p align="center">
-  <img src="figures/efficiency_scaling.png" width="78%">
-  <br><em>Fig. 2. Total tokens grow ~linearly with budget B.</em>
-</p>
-
-<p align="center">
-  <img src="figures/accuracy_budget_curve.png" width="78%">
-  <br><em>Fig. 3. Accuracy vs budget shows graceful improvement and early saturation.</em>
-</p>
 
 ---
 
 ## 💻 CLI Quick Reference
 
-    python run.py --method {cot,sc_cot,bamot,tot,got,fot} \
-                  --dataset {gsm8k,game24,strategyqa,aime,math500} \
-                  [--limit N] \
-                  [--model NAME] \
-                  [--temperature T] \
-                  [--max_tokens N] \
-                  [--budget_tokens B] \
-                  [--seeds S] \
-                  [--sc_samples K] \
-                  [--exp_name TAG] \
-                  [--bamot_no_triage] [--bamot_no_consensus] \
-                  [--bamot_seed_tokens TS] [--bamot_refine_tokens TR] \
-                  [--bamot_early_stop_gold] [--bamot_gold_value V] \
-                  [--tot_branch B] [--tot_depth D] \
-                  [--got_beam K] [--got_steps R] \
-                  [--fot_trees F] [--fot_branch B] [--fot_depth D]
+```bash
+python3 run.py \
+  --method {cot,sc_cot,bamot,tot,got,fot} \
+  --dataset {gsm8k,game24,strategyqa,math500} \
+  [--limit N] \
+  [--backend {openai,llama_cpp}] \
+  [--llama_model_path PATH] \
+  [--budget_tokens B] \
+  [--seeds S] \
+  [--bamot_seed_tokens TS] \
+  [--bamot_refine_tokens TR] \
+  [--exp_name TAG]
+```
 
-- **Budgeted baselines:** tune branch/depth/beam/steps to fit the same `--budget_tokens`.  
-- **Reproducibility:** use `--exp_name` to snapshot CSVs into `./results/`.
+**Full parameter list:**
+- `--method`: Method to use (bamot, cot, sc_cot, tot, got, fot)
+- `--dataset`: Dataset name (gsm8k, game24, strategyqa, math500)
+- `--limit`: Number of items to process
+- `--backend`: LLM backend (openai, llama_cpp)
+- `--llama_model_path`: Path to GGUF model file
+- `--budget_tokens`: Token budget for BAMoT
+- `--seeds`: Number of micro-seeds
+- `--exp_name`: Experiment name (for output CSV)
 
 ---
 
 ## 🧩 Troubleshooting
 
-- **“invalid choice: 'gsm8k_fot'”**  
-  Use `--dataset gsm8k` (not `gsm8k_fot`). If you drop FoT-style JSONL files, keep the dataset name unchanged; place files under `data/gsm8k/test.jsonl` (or adapt loader).
+### "OPENAI_API_KEY not set" Error
+```bash
+export OPENAI_API_KEY="sk-..."
+# Verify: echo $OPENAI_API_KEY
+```
 
-- **“SyntaxError: for B in ...” in Python**  
-  Bash for-loops go in **shell**, not Python. Use a shell cell or wrap with `subprocess` if needed.
+### "llama-cpp-python not found"
+```bash
+pip install llama-cpp-python
+# For Apple Silicon: CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
+```
 
-- **Latency spikes in tree methods**  
-  Reduce `--tot_depth / --fot_depth` or beams; keep **budget parity** with BAMoT for fair comparisons.
+### "No LLaMA model path provided"
+```bash
+export LLAMA_MODEL_PATH="/path/to/model.gguf"
+# Or use --llama_model_path argument
+```
+
+### Rate Limiting
+- Add delays between calls if hitting rate limits
+- Use `--limit` to test on smaller subsets first
+
+### Token Budget Issues
+- Verify budget enforcement: check `results/*.csv` for token usage
+- Should be ≤ `budget_tokens` per item
+
+---
+
+## 🔬 Ablations
+
+| Variant | Accuracy | Mean Tokens | p50 Latency |
+|:--------|:--------:|------------:|------------:|
+| **BAMoT (base s2,r256)** | 1.00 | ~640 | ~3.1s |
+| NoTriage | 0.00 | ~638 | ~3.5s |
+| NoConsensus | 1.00 | ~620 | ~3.4s |
+| s1,r256 | 0.75 | ~582 | ~3.1s |
+| s3,r256 | 0.50 | ~629 | ~3.4s |
+
+**Takeaway:** Triage is essential; consensus can be relaxed for arithmetic; seeds=2 is optimal.
 
 ---
 
 ## 🧠 Citation
 
-    @article{tariq2025bamot,
-      title   = {BAMoT: Budget-Aware Mesh-of-Thoughts for Efficient LLM Reasoning},
-      author  = {Muhmmad Tariq and Tahseen Zia},
-      journal = {arXiv preprint arXiv:XXXX.XXXXX},
-      year    = {2025}
-    }
+```bibtex
+@article{tariq2025bamot,
+  title   = {BAMoT: Budget-Aware Mesh-of-Thoughts for Efficient LLM Reasoning},
+  author  = {Muhmmad Tariq and Tahseen Zia},
+  journal = {arXiv preprint},
+  year    = {2025}
+}
+```
 
 ---
 
 ## 💡 Acknowledgments
+
 Developed under the supervision of **Prof. Tahseen Zia**, COMSATS University Islamabad.  
 Builds on open-source CoT/ToT/GoT/FoT reasoning paradigms.
 
 ---
 
-<!-- Optional links -->
-<!-- [📄 Paper (arXiv)](https://arxiv.org/abs/XXXX.XXXXX) -->
-<!-- [🧪 Colab Demo](https://colab.research.google.com/) -->
+## 📊 Results Files
+
+All experiment results are saved to `results/` directory as CSV files. To regenerate comparisons:
+
+```bash
+python3 compare_all_methods_backends.py
+```
+
+This generates `results/comprehensive_comparison.csv` with detailed metrics across all methods and backends.
+
+---
+
+## 🔗 Additional Resources
+
+- **Repository**: https://github.com/mttariqi/bamot
+- **Issues**: Report bugs or request features via GitHub Issues
+- **Paper**: (arXiv link to be added)
+
+---
+
+**Last Updated**: November 2025  
+**Version**: 1.0
