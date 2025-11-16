@@ -197,7 +197,13 @@ def main():
 
     # --- main loop over ONLY the pending/limited items ---
     pbar_desc = f"Running {args.method} on {args.dataset}"
-    for ex_id, ex in tqdm(pending_pairs, total=len(pending_pairs), desc=pbar_desc):
+    total_items = len(pending_pairs)
+    print(f"\n[Progress] Starting {total_items} items...\n", flush=True)
+    
+    for idx, (ex_id, ex) in enumerate(tqdm(pending_pairs, total=total_items, desc=pbar_desc), 1):
+        # Print progress every 5 items or on first/last
+        if idx == 1 or idx % 5 == 0 or idx == total_items:
+            print(f"[{idx}/{total_items}] Processing {ex_id}...", flush=True)
         t0 = time.time()  # fallback latency
 
         # Copy example; shape prompt per dataset without mutating original
@@ -297,6 +303,10 @@ def main():
             "latency_sec": latency
         })
         f.flush(); os.fsync(f.fileno())
+        
+        # Print completion status every 5 items
+        if idx % 5 == 0 or idx == total_items:
+            print(f"[{idx}/{total_items}] ✅ Completed {ex_id} | Correct: {int(bool(corr))} | Tokens: {usage.get('prompt_tokens', 0) + usage.get('completion_tokens', 0)} | Latency: {latency:.2f}s", flush=True)
 
     f.close()
 

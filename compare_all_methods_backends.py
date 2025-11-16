@@ -107,7 +107,14 @@ def main():
             elif backend_key == "llama":
                 pattern = f"{method}_g24_llama_100.csv"
             elif backend_key == "qwen":
-                pattern = f"{method}_g24_qwen_100.csv"
+                # Try fixed results first, then fall back to original
+                pattern_fixed = f"{method}_g24_qwen_100_fixed.csv"
+                pattern_orig = f"{method}_g24_qwen_100.csv"
+                files_fixed = glob.glob(f"results/{pattern_fixed}")
+                if files_fixed:
+                    pattern = pattern_fixed
+                else:
+                    pattern = pattern_orig
             else:
                 continue
             
