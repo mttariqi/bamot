@@ -37,7 +37,15 @@ class ModelGateway:
         self._llama_threads = llama_threads
 
         if backend == "openai":
-            self.client = OpenAI() if _HAS_OPENAI else None
+            if _HAS_OPENAI:
+                # Explicitly pass API key to ensure it's used
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    self.client = OpenAI(api_key=api_key)
+                else:
+                    self.client = OpenAI()  # Fallback to env var
+            else:
+                self.client = None
         elif backend == "llama_cpp":
             self._init_llama_cpp(llama_model_path, llama_ctx, llama_threads)
         else:

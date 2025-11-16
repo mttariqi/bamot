@@ -280,6 +280,36 @@ python3 run.py \
 
 ---
 
+## 🔄 Recent Updates & Improvements
+
+### Latest Changes (November 2024)
+
+1. **Qwen Backend Fix**
+   - Fixed backend inheritance issue in BAMoT and FoT methods
+   - Internal ModelGateway instances now correctly inherit backend configuration
+   - Ensures Qwen models work properly with all reasoning methods
+
+2. **Progress Display Improvements**
+   - Added visible progress indicators every 5 items during experiments
+   - Real-time completion status with token usage and latency metrics
+   - Better monitoring for long-running experiments
+
+3. **OpenAI API Key Handling**
+   - Explicit API key passing to OpenAI client for consistency
+   - Improved error handling and verification
+
+4. **Resume Functionality**
+   - Enhanced resume capability to skip already-completed items
+   - Automatic detection of existing results files
+   - Saves time on interrupted experiments
+
+5. **BAMoT Budget Analysis**
+   - Comprehensive analysis of budget constraints on different datasets
+   - Identified trade-offs between efficiency and accuracy
+   - Documentation of optimal budget settings per dataset type
+
+---
+
 ## 🧩 Troubleshooting
 
 ### "OPENAI_API_KEY not set" Error
