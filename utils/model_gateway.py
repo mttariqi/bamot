@@ -51,9 +51,19 @@ class ModelGateway:
         else:
             raise ValueError(f"Unsupported backend: {backend}")
 
-    def chat(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+    def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        max_tokens_override: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        max_tokens = max_tokens_override or self.max_tokens
         if self.backend == "llama_cpp":
-            return self._chat_llama(system_prompt, user_prompt)
+            result = self._chat_llama(system_prompt, user_prompt, max_tokens_override=max_tokens)
+            # Add small delay after LLaMA calls to prevent overheating
+            time.sleep(0.5)  # 500ms pause between LLaMA calls
+            return result
 
         if not self.client:
             # Check if API key is missing
@@ -74,7 +84,7 @@ class ModelGateway:
             resp = self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=max_tokens,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -125,9 +135,16 @@ class ModelGateway:
             temperature=self.temperature,
         )
 
-    def _chat_llama(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+    def _chat_llama(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        max_tokens_override: Optional[int] = None,
+    ) -> Dict[str, Any]:
         if not self._llama:
             raise RuntimeError("LLaMA backend not initialized")
+        max_tokens = max_tokens_override or self.max_tokens
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -137,7 +154,7 @@ class ModelGateway:
         resp = self._llama.create_chat_completion(
             messages=messages,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens,
         )
         end = time.time()
         choices = resp.get("choices", [])

@@ -204,6 +204,12 @@ python3 compare_all_methods_backends.py
 - `--bamot_no_consensus` : Disable final consensus
 - `--bamot_refine_topk K` : Number of top candidates to refine
 
+**Fair-budget protocol (new default):**
+
+- `--budget_tokens` now defaults to **3200 tokens** and acts as the global per-item cap.
+- If `--method_token_budget` is not provided, it automatically inherits `--budget_tokens`, so ToT/GoT/FoT are forced to stop the moment they spend the same budget as BAMoT.
+- This keeps every method honest and makes comparisons directly apples-to-apples.
+
 **Complexity:** `O(S·T_s + K·R·T_r) ≤ O(B)` — BAMoT spends a fixed budget instead of exploring exponentially.
 
 ---
