@@ -103,7 +103,8 @@ def main():
     ap.add_argument("--max_tokens", type=int, default=512)
 
     # shared experiment params
-    ap.add_argument("--budget_tokens", type=int, default=800)  # used by BAMoT
+    ap.add_argument("--budget_tokens", type=int, default=3200,
+                    help="Global per-item token budget for BAMoT (and default for other methods).")
     ap.add_argument("--seeds", type=int, default=4)            # used by BAMoT
     ap.add_argument("--sc_samples", type=int, default=5)       # used by SC-CoT
     ap.add_argument("--exp_name", default=None)
@@ -125,12 +126,19 @@ def main():
     ap.add_argument("--fot_trees", type=int, default=3)
     ap.add_argument("--fot_branch", type=int, default=2)
     ap.add_argument("--fot_depth", type=int, default=1)
+    ap.add_argument("--method_token_budget", type=int, default=None,
+                    help="Hard cap on total prompt+completion tokens per item for ToT/GoT/FoT. "
+                         "Defaults to --budget_tokens for fair comparisons.")
 
     # ===== Persistence & resume =====
     ap.add_argument("--out_dir", type=str, default="results", help="Directory to write per-run CSVs.")
     ap.add_argument("--resume_from", type=str, default="", help="Existing CSV path to resume from (skip already-done IDs).")
 
     args = ap.parse_args()
+
+    # --- enforce shared token budget across methods ---
+    if args.method_token_budget is None:
+        args.method_token_budget = args.budget_tokens
 
     # --- output paths ---
     os.makedirs(args.out_dir, exist_ok=True)
@@ -257,13 +265,35 @@ def main():
 
 
             elif args.method == "tot":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, branch=args.tot_branch, depth=args.tot_depth)
+                out = run_fn(
+                    item_for_method,
+                    gateway=gw,
+                    cot_system=cot_system,
+                    branch=args.tot_branch,
+                    depth=args.tot_depth,
+                    token_budget=args.method_token_budget,
+                )
 
             elif args.method == "got":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, steps=args.got_steps, beam=args.got_beam)
+                out = run_fn(
+                    item_for_method,
+                    gateway=gw,
+                    cot_system=cot_system,
+                    steps=args.got_steps,
+                    beam=args.got_beam,
+                    token_budget=args.method_token_budget,
+                )
 
             elif args.method == "fot":
-                out = run_fn(item_for_method, gateway=gw, cot_system=cot_system, trees=args.fot_trees, branch=args.fot_branch, depth=args.fot_depth)
+                out = run_fn(
+                    item_for_method,
+                    gateway=gw,
+                    cot_system=cot_system,
+                    trees=args.fot_trees,
+                    branch=args.fot_branch,
+                    depth=args.fot_depth,
+                    token_budget=args.method_token_budget,
+                )
 
             else:  # "cot"
                 out = run_fn(item_for_method, gateway=gw, cot_system=cot_system)
@@ -303,6 +333,10 @@ def main():
             "latency_sec": latency
         })
         f.flush(); os.fsync(f.fileno())
+        
+        # Add extra delay for LLaMA backend to prevent overheating
+        if args.backend == "llama_cpp":
+            time.sleep(5.0)  # 5 second pause between items for LLaMA
         
         # Print completion status every 5 items
         if idx % 5 == 0 or idx == total_items:

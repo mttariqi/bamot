@@ -71,3 +71,57 @@ smoke_test_*.csv
 *.pkl
 *.pickle
 
+# LaTeX compiled outputs (thesis and paper)
+thesis/*.pdf
+thesis/*.aux
+thesis/*.log
+thesis/*.out
+thesis/*.toc
+thesis/*.lof
+thesis/*.lot
+thesis/*.bbl
+thesis/*.blg
+thesis/*.synctex.gz
+thesis/*.fdb_latexmk
+thesis/*.fls
+paper/*.pdf
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz
+paper/*.fdb_latexmk
+paper/*.fls
+
+# Word documents (original drafts)
+*.docx
+*.doc
+
+# Thesis and paper directories (exclude from repo)
+thesis/
+paper/
+paper_extracted/
+paper_overleaf.zip
+
+# Analysis and temporary scripts
+analysis/
+*.resume.log
+*.log
+qwen_gsm8k_resume.log
+tot_math500_qwen_resume.log
+
+# Documentation files (meeting notes, setup guides)
+SUPERVISOR_MEETING_SUMMARY.md
+WRITING_SETUP.md
+
+# Temporary analysis scripts
+analyze_ablation*.py
+check_progress.sh
+monitor_progress.sh
+run_all_datasets_100.sh
+run_llama_with_delay.sh
+
+# Figures (if not needed in repo)
+figures/

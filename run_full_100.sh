@@ -14,8 +14,10 @@ cd "$(dirname "$0")"
 
 # StrategyQA - Full 100 items
 echo "=== StrategyQA (100 items) ==="
+GLOBAL_BUDGET=3200
+
 echo "BAMoT..."
-python3 run.py --method bamot --dataset strategyqa --budget_tokens 1200 --seeds 2 --limit 100 --exp_name bamot_sqa_100
+python3 run.py --method bamot --dataset strategyqa --budget_tokens $GLOBAL_BUDGET --seeds 2 --limit 100 --exp_name bamot_sqa_100
 
 echo "CoT..."
 python3 run.py --method cot --dataset strategyqa --limit 100 --exp_name cot_sqa_100
@@ -27,7 +29,7 @@ python3 run.py --method sc_cot --dataset strategyqa --sc_samples 5 --limit 100 -
 echo ""
 echo "=== Game24 (100 items) ==="
 echo "BAMoT..."
-python3 run.py --method bamot --dataset game24 --budget_tokens 1800 --seeds 3 --bamot_seed_tokens 100 --bamot_refine_tokens 300 --limit 100 --exp_name bamot_g24_100
+python3 run.py --method bamot --dataset game24 --budget_tokens $GLOBAL_BUDGET --seeds 3 --bamot_seed_tokens 100 --bamot_refine_tokens 300 --limit 100 --exp_name bamot_g24_100
 
 echo "ToT..."
 python3 run.py --method tot --dataset game24 --tot_branch 2 --tot_depth 2 --limit 100 --exp_name tot_g24_100

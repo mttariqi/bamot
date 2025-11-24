@@ -191,9 +191,9 @@ def _score_text_for_mode(text: str, task_mode: str, target_nums: Optional[List[i
                         close = 0.0  # Too far, reject
                     else:
                         close = max(0.0, 1.0 - (distance / 10.0))  # Linear penalty
-                nums_ok = 1.0 if (target_nums and _uses_exact_multiset(e, target_nums)) else 0.0
-                # Weight exact 24 much more heavily
-                best = max(best, 0.9 * close + 0.1 * nums_ok)
+            nums_ok = 1.0 if (target_nums and _uses_exact_multiset(e, target_nums)) else 0.0
+            # Weight exact 24 much more heavily
+            best = max(best, 0.9 * close + 0.1 * nums_ok)
         return best if best > 0 else 0.1
     # numeric
     return 1.0 if extract_numeric_answer(text) else 0.2
@@ -241,11 +241,20 @@ def run_item(
     total_comp = 0
     latencies: List[float] = []
 
+    def _ready_for_numeric_accept() -> bool:
+        if task_mode != "numeric":
+            return True
+        remaining = budget_tokens - (total_prompt + total_comp)
+        # For numeric tasks, be very conservative - only accept early when extremely close to budget
+        # This encourages maximum exploration and refinement for complex math problems
+        threshold = max(200, int(0.05 * budget_tokens))  # Reduced from 0.10 to 0.05 (only last 5% of budget)
+        return remaining <= threshold
+
     # ---------- 1) MICRO-SEEDS ----------
     seed_pool: List[Tuple[str, Optional[str], float]] = []
     seed_budget_limit = int(max(1, budget_tokens * seed_budget_frac))
 
-    def _try_take_valid(text: str) -> Optional[str]:
+    def _try_take_valid(text: str, *, allow_any: bool = False) -> Optional[str]:
         """Return first valid answer for early stopping."""
         if task_mode == "game24":
             for e in _extract_all_game24_exprs(text):
@@ -267,17 +276,23 @@ def run_item(
         else:  # numeric
             # For numeric tasks, check if we have a valid answer
             pred = extract_numeric_answer(text)
-            if pred and gold_answer:
-                # Early stop if we match gold (optional, controlled by early_stop_gold)
-                if early_stop_gold:
+            if pred:
+                if gold_answer and early_stop_gold and not allow_any:
+                    # Early stop if match gold, otherwise keep refining
                     try:
                         pred_f = float(pred)
                         gold_f = float(str(gold_answer))
                         if math.isclose(pred_f, gold_f, rel_tol=1e-9, abs_tol=1e-9):
                             return pred
-                    except:
+                    except Exception:
                         pass
-            return pred if pred else None
+                elif allow_any:
+                    # When allow_any is True we accept any numeric answer to make progress
+                    return pred
+                else:
+                    # For default behavior, keep this only if we matched gold or allow_any
+                    return None
+            return None
 
     for i in range(seeds):
         if (total_prompt + total_comp) >= seed_budget_limit and len(seed_pool) > 0:
@@ -298,11 +313,20 @@ def run_item(
         txt = out["text"]
 
         # Early-stop if any valid answer already appears
-        got_answer = _try_take_valid(txt)
-        if got_answer:
+        # For boolean tasks, require at least 2 seeds before early stopping to get diversity
+        # For numeric tasks (like MATH-500), require at least 5 seeds to get maximum diversity
+        min_seeds_for_early_stop = 2 if task_mode == "boolean" else (5 if task_mode == "numeric" else 0)
+        got_answer = _try_take_valid(txt, allow_any=_ready_for_numeric_accept())
+        if got_answer and len(seed_pool) >= min_seeds_for_early_stop:
             u = out.get("usage", {}) or {}
-            total_prompt += u.get("prompt_tokens", 0) or 0
-            total_comp += u.get("completion_tokens", 0) or 0
+            pt = u.get("prompt_tokens")
+            ct = u.get("completion_tokens")
+            if pt is None or ct is None:
+                est = estimate_tokens(prompt + txt)
+                pt = pt or int(est * 0.6)
+                ct = ct or int(est * 0.4)
+            total_prompt += pt or 0
+            total_comp += ct or 0
             if out.get("latency") is not None:
                 latencies.append(out["latency"])
             return {
@@ -333,8 +357,15 @@ def run_item(
         seed_pool.append((txt, pred, sc))
 
         u = out.get("usage", {}) or {}
-        total_prompt += u.get("prompt_tokens", 0) or 0
-        total_comp   += u.get("completion_tokens", 0) or 0
+        pt = u.get("prompt_tokens")
+        ct = u.get("completion_tokens")
+        if pt is None or ct is None:
+            # Fallback estimate if OpenAI usage not provided
+            est = estimate_tokens(prompt + txt)
+            pt = pt or int(est * 0.6)
+            ct = ct or int(est * 0.4)
+        total_prompt += pt or 0
+        total_comp   += ct or 0
         if out.get("latency") is not None:
             latencies.append(out["latency"])
 
@@ -354,11 +385,19 @@ def run_item(
         pred = extract_numeric_answer(txt) if task_mode != "game24" else None
         seed_pool.append((txt, pred, _score_text_for_mode(txt, task_mode, target_nums=target_nums)))
         u = out.get("usage", {}) or {}
-        total_prompt += u.get("prompt_tokens", 0) or 0
-        total_comp   += u.get("completion_tokens", 0) or 0
+        pt = u.get("prompt_tokens")
+        ct = u.get("completion_tokens")
+        if pt is None or ct is None:
+            est = estimate_tokens(refine_prompt + new_txt)
+            pt = pt or int(est * 0.6)
+            ct = ct or int(est * 0.4)
+        total_prompt += pt or 0
+        total_comp   += ct or 0
 
     best_pool = sorted(seed_pool, key=lambda x: x[2], reverse=True)
     token_spend = total_prompt + total_comp
+    refine_calls = 0
+    refine_token_sum = 0.0
 
     # ---------- 2) SELECTIVE REFINEMENTS ----------
     refine_gws = [
@@ -413,8 +452,13 @@ def run_item(
 
     # Refinement loop: check budget BEFORE each API call
     while token_spend < budget_tokens:
-        # Check if we can afford another refinement (estimate)
-        estimated_refine_cost = refine_tokens * 2  # rough estimate: prompt + completion
+        # Estimate cost of the next refinement based on observed usage so far
+        if refine_calls > 0:
+            avg_cost = refine_token_sum / refine_calls
+        else:
+            # Fallback heuristic before we have data: assume half the max tokens, but cap to 512
+            avg_cost = min(max(256, refine_tokens * 0.5), 512)
+        estimated_refine_cost = max(150, avg_cost * 1.2)
         if token_spend + estimated_refine_cost > budget_tokens:
             break
         
@@ -432,7 +476,7 @@ def run_item(
         new_txt = out["text"]
 
         # Early-stop if any valid answer appears now
-        got_answer = _try_take_valid(new_txt)
+        got_answer = _try_take_valid(new_txt, allow_any=_ready_for_numeric_accept() or (token_spend + estimated_refine_cost >= budget_tokens))
         if got_answer:
             u = out.get("usage", {}) or {}
             total_prompt += u.get("prompt_tokens", 0) or 0
@@ -468,6 +512,9 @@ def run_item(
         u = out.get("usage", {}) or {}
         pt = u.get("prompt_tokens", 0) or 0
         ct = u.get("completion_tokens", 0) or 0
+        actual_refine_cost = (pt or 0) + (ct or 0)
+        refine_token_sum += actual_refine_cost
+        refine_calls += 1
         total_prompt += pt
         total_comp += ct
         token_spend = total_prompt + total_comp

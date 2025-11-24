@@ -1,8 +1,10 @@
 from typing import Dict, Any, List, Tuple, Optional
-from utils.model_gateway import ModelGateway
-from utils.evals import extract_numeric_answer, extract_game24_expression, _numbers_from_question, _safe_eval
 import math
 from collections import Counter
+
+from utils.model_gateway import ModelGateway
+from utils.evals import extract_numeric_answer, extract_game24_expression, _numbers_from_question, _safe_eval
+from utils.tokens import estimate_tokens
 
 def _score(txt: str, task_mode: str = "numeric", target_nums: Optional[List[int]] = None) -> float:
     """Improved scoring for Graph-of-Thoughts."""
@@ -31,7 +33,14 @@ def _score(txt: str, task_mode: str = "numeric", target_nums: Optional[List[int]
         num = 1.0 if any(ch.isdigit() for ch in txt) else 0.0
         return 0.6*has + 0.4*num
 
-def run_item(item: Dict[str, Any], gateway: ModelGateway, cot_system: str, steps: int = 3, beam: int = 4):
+def run_item(
+    item: Dict[str, Any],
+    gateway: ModelGateway,
+    cot_system: str,
+    steps: int = 3,
+    beam: int = 4,
+    token_budget: Optional[int] = None,
+):
     question = item.get("question", "")
     task_mode = "game24" if ("make 24" in question.lower() or "to make 24" in question.lower()) else "numeric"
     target_nums = None
@@ -41,15 +50,58 @@ def run_item(item: Dict[str, Any], gateway: ModelGateway, cot_system: str, steps
             target_nums = _numbers_from_question(question)
     
     if task_mode == "game24":
-        prompt = f"{question}\n\nUse ONLY the numbers {target_nums} exactly once each with + - * / and parentheses to make 24.\nReturn: EXPR: <expression>  ANSWER: 24"
+        root_prompt = (
+            f"{question}\n\nUse ONLY the numbers {target_nums} exactly once each with + - * / and parentheses to make 24.\n"
+            "Return: EXPR: <expression>  ANSWER: 24"
+        )
     else:
-        prompt = f"{question}\n\nShow your work. End with: ANSWER: <number>"
+        root_prompt = f"{question}\n\nShow your work. End with: ANSWER: <number>"
     
-    root = gateway.chat(system_prompt=cot_system, user_prompt=prompt)
+    total_prompt = 0
+    total_comp = 0
+    latencies: List[float] = []
+    safety_margin = 32
 
-    total_prompt = (root.get("usage", {}) or {}).get("prompt_tokens", 0) or 0
-    total_comp   = (root.get("usage", {}) or {}).get("completion_tokens", 0) or 0
-    latencies = [root.get("latency")] if root.get("latency") else []
+    def remaining_budget():
+        if token_budget is None:
+            return None
+        return token_budget - (total_prompt + total_comp)
+
+    def request_chat(user_prompt: str):
+        nonlocal total_prompt, total_comp
+        max_override = None
+        if token_budget is not None:
+            rem = remaining_budget()
+            if rem is None or rem <= safety_margin:
+                return None
+            prompt_est = estimate_tokens(cot_system) + estimate_tokens(user_prompt)
+            if rem <= prompt_est + safety_margin:
+                return None
+            available = rem - prompt_est - safety_margin
+            if available < 16:
+                return None
+            max_override = min(gateway.max_tokens, int(available))
+        out = gateway.chat(
+            system_prompt=cot_system,
+            user_prompt=user_prompt,
+            max_tokens_override=max_override,
+        )
+        usage = out.get("usage", {}) or {}
+        total_prompt += usage.get("prompt_tokens", 0) or 0
+        total_comp += usage.get("completion_tokens", 0) or 0
+        lat = out.get("latency")
+        if lat:
+            latencies.append(lat)
+        return out
+
+    root = request_chat(root_prompt)
+    if root is None:
+        return {
+            "text": "BUDGET_EXHAUSTED",
+            "pred": None,
+            "usage": {"prompt_tokens": total_prompt, "completion_tokens": total_comp},
+            "latency": None,
+        }
 
     pool: List[Tuple[str, str, float]] = [
         (root['text'], 
@@ -58,24 +110,36 @@ def run_item(item: Dict[str, Any], gateway: ModelGateway, cot_system: str, steps
     ]
 
     for _ in range(steps):
+        rem = remaining_budget()
+        if rem is not None and rem <= safety_margin:
+            break
         pool.sort(key=lambda x: x[2], reverse=True)
         frontier = pool[:beam]
         new_nodes: List[Tuple[str, str, float]] = []
         for (txt, pred, sc) in frontier:
+            rem = remaining_budget()
+            if rem is not None and rem <= safety_margin:
+                break
             if task_mode == "game24":
-                rp = f"Consider an alternative approach. Use ONLY {target_nums} exactly once each.\n\nQuestion: {question}\n\nCurrent:\n{txt}\n\nReturn: EXPR: <expression>  ANSWER: 24"
+                rp = (
+                    f"Consider an alternative approach. Use ONLY {target_nums} exactly once each.\n\n"
+                    f"Question: {question}\n\nCurrent:\n{txt}\n\nReturn: EXPR: <expression>  ANSWER: 24"
+                )
             else:
-                rp = f"Consider an alternative path but reuse any valid partial results.\n\nQuestion: {question}\n\nCurrent:\n{txt}\n\nEnd with: ANSWER: <number>"
-            out = gateway.chat(system_prompt=cot_system, user_prompt=rp)
+                rp = (
+                    f"Consider an alternative path but reuse any valid partial results.\n\nQuestion: {question}\n\nCurrent:\n{txt}\n\n"
+                    "End with: ANSWER: <number>"
+                )
+            out = request_chat(rp)
+            if out is None:
+                break
             t = out["text"]
             p = extract_game24_expression(t) if task_mode == "game24" else extract_numeric_answer(t)
             s = _score(t, task_mode, target_nums)
             new_nodes.append((t,p,s))
-            u = out.get("usage", {}) or {}
-            total_prompt += u.get("prompt_tokens", 0) or 0
-            total_comp   += u.get("completion_tokens", 0) or 0
-            if out.get("latency"):
-                latencies.append(out["latency"])
+            rem = remaining_budget()
+            if rem is not None and rem <= safety_margin:
+                break
 
         # merge by predicted answer (GoT key feature: merging nodes)
         merged = {}
