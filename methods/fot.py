@@ -66,8 +66,8 @@ def self_correct(
 def run_tree(tmp_gw: ModelGateway, q: str, system: str, task_mode: str, target_nums: Optional[List[int]], 
              branch: int, depth: int, enable_correction: bool = True, token_budget: Optional[int] = None):
     """Run a single tree with optional self-correction."""
-    total_prompt = 0
-    total_comp = 0
+        total_prompt = 0
+        total_comp = 0
     latencies = []
 
     safety_margin = 32
@@ -116,15 +116,15 @@ def run_tree(tmp_gw: ModelGateway, q: str, system: str, task_mode: str, target_n
     root = request_chat(root_prompt)
     if root is None:
         return "BUDGET_EXHAUSTED", total_prompt, total_comp, None
-    pool = [root["text"]]
+        pool = [root["text"]]
 
     # Expand tree
     for d in range(depth):
         rem = remaining_budget()
         if rem is not None and rem <= safety_margin:
             break
-        new = []
-        for p in pool:
+            new = []
+            for p in pool:
             rem = remaining_budget()
             if rem is not None and rem <= safety_margin:
                 break
@@ -139,7 +139,7 @@ def run_tree(tmp_gw: ModelGateway, q: str, system: str, task_mode: str, target_n
                 out = request_chat(expand_prompt)
                 if out is None:
                     break
-                new.append(out["text"])
+                    new.append(out["text"])
                 rem = remaining_budget()
                 if rem is not None and rem <= safety_margin:
                     break
@@ -241,8 +241,8 @@ def run_item(item: Dict[str, Any], gateway: ModelGateway, cot_system: str,
 
     # Consensus: majority voting
     if preds:
-        final = Counter(preds).most_common(1)
-        pred = final[0][0] if final else None
+    final = Counter(preds).most_common(1)
+    pred = final[0][0] if final else None
     else:
         pred = None
     
@@ -250,7 +250,7 @@ def run_item(item: Dict[str, Any], gateway: ModelGateway, cot_system: str,
     
     return {
         "text": f"FoT: {len(preds)} predictions from {trees} trees",
-        "pred": pred,
+            "pred": pred,
         "usage": {"prompt_tokens": tot_prompt, "completion_tokens": tot_comp},
         "latency": avg_latency
     }
