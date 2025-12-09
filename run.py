@@ -111,6 +111,8 @@ def main():
 
     # ===== BAMoT controls / ablations =====
     ap.add_argument("--bamot_no_triage", action="store_true")
+    ap.add_argument("--bamot_triage_method", type=str, default="rule_based", choices=["rule_based", "small_llm"],
+                    help="Triage method: 'rule_based' (default) or 'small_llm' (uses LLaMA for scoring)")
     ap.add_argument("--bamot_no_consensus", action="store_true")
     ap.add_argument("--bamot_seed_tokens", type=int, default=80)     # micro-seed token cap
     ap.add_argument("--bamot_refine_tokens", type=int, default=256)  # refinement token cap
@@ -247,6 +249,22 @@ def main():
 
             elif args.method == "bamot":
               task_mode = "boolean" if args.dataset == "strategyqa" else ("game24" if args.dataset == "game24" else "numeric")
+              
+              # Create triage gateway if using small LLM triage
+              triage_gateway = None
+              if args.bamot_triage_method == "small_llm" and not args.bamot_no_triage:
+                  if not args.llama_model_path:
+                      raise ValueError("--llama_model_path is required when using --bamot_triage_method=small_llm")
+                  triage_gateway = ModelGateway(
+                      model="llama",  # Use LLaMA for triage
+                      backend="llama_cpp",
+                      temperature=0.1,  # Low temperature for consistent scoring
+                      max_tokens=50,  # Short responses for scoring
+                      llama_model_path=args.llama_model_path,
+                      llama_ctx=2048,  # Smaller context for triage
+                      llama_threads=args.llama_threads,
+                  )
+              
               out = run_fn(
                   item_for_method,
                   gateway=gw,
@@ -254,6 +272,8 @@ def main():
                   seeds=args.seeds,
                   budget_tokens=args.budget_tokens,
                   no_triage=args.bamot_no_triage,
+                  triage_method=args.bamot_triage_method,
+                  triage_gateway=triage_gateway,
                   no_consensus=args.bamot_no_consensus,
                   seed_tokens=args.bamot_seed_tokens,
                   refine_tokens=args.bamot_refine_tokens,

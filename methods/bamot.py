@@ -163,6 +163,7 @@ def _refine_prompt(task_mode: str, question: str, attempt_text: str, feedback: s
     )
 
 def _score_text_for_mode(text: str, task_mode: str, target_nums: Optional[List[int]] = None) -> float:
+    """Rule-based scoring (original method)."""
     if not text:
         return 0.0
     if task_mode == "boolean":
@@ -198,6 +199,70 @@ def _score_text_for_mode(text: str, task_mode: str, target_nums: Optional[List[i
     # numeric
     return 1.0 if extract_numeric_answer(text) else 0.2
 
+def _score_text_with_llm(
+    text: str, 
+    triage_gateway: ModelGateway,
+    task_mode: str,
+    question: str = "",
+    target_nums: Optional[List[int]] = None
+) -> float:
+    """
+    Score text using small LLM (LLaMA 1B) for triage.
+    Returns a score between 0.0 and 1.0.
+    """
+    if not text:
+        return 0.0
+    
+    # Create scoring prompt
+    if task_mode == "game24":
+        scoring_prompt = f"""Score this reasoning quality on a scale of 0.0 to 1.0, where 1.0 means the reasoning is correct and complete, and 0.0 means it's incorrect or incomplete.
+
+Question: {question}
+
+Reasoning: {text}
+
+Respond with only a number between 0.0 and 1.0:"""
+    elif task_mode == "boolean":
+        scoring_prompt = f"""Score this reasoning quality on a scale of 0.0 to 1.0, where 1.0 means the reasoning leads to a clear yes/no answer, and 0.0 means it's unclear or incorrect.
+
+Question: {question}
+
+Reasoning: {text}
+
+Respond with only a number between 0.0 and 1.0:"""
+    else:  # numeric
+        scoring_prompt = f"""Score this reasoning quality on a scale of 0.0 to 1.0, where 1.0 means the reasoning is correct and leads to a numeric answer, and 0.0 means it's incorrect or incomplete.
+
+Question: {question}
+
+Reasoning: {text}
+
+Respond with only a number between 0.0 and 1.0:"""
+    
+    try:
+        system_prompt = "You are a helpful assistant that scores reasoning quality. Respond with only a number between 0.0 and 1.0."
+        out = triage_gateway.chat(system_prompt=system_prompt, user_prompt=scoring_prompt)
+        response_text = out.get("text", "").strip()
+        
+        # Extract numeric score from response
+        # Look for patterns like "0.7", "0.75", "7/10", "70%", etc.
+        score_match = re.search(r'(\d+\.?\d*)', response_text)
+        if score_match:
+            score = float(score_match.group(1))
+            # Normalize to 0-1 range (handle cases like "70" meaning 0.70 or "7" meaning 0.7)
+            if score > 1.0:
+                score = score / 100.0  # Assume percentage if > 1
+            elif score > 10.0:
+                score = score / 10.0  # Assume 0-10 scale
+            score = max(0.0, min(1.0, score))  # Clamp to [0, 1]
+            return score
+        else:
+            # Fallback: if no number found, use rule-based scoring
+            return _score_text_for_mode(text, task_mode, target_nums)
+    except Exception as e:
+        # If LLM call fails, fallback to rule-based scoring
+        return _score_text_for_mode(text, task_mode, target_nums)
+
 # --------------------------
 # BAMoT main
 # --------------------------
@@ -211,6 +276,8 @@ def run_item(
     budget_tokens: int = 1200,
     no_triage: bool = False,
     no_consensus: bool = False,
+    triage_method: str = "rule_based",  # "rule_based" or "small_llm"
+    triage_gateway: Optional[ModelGateway] = None,  # Required if triage_method == "small_llm"
     seed_tokens: int = 80,
     refine_tokens: int = 320,
     early_stop_gold: bool = False,     # ignored for game24
@@ -353,7 +420,13 @@ def run_item(
         else:
             pred = extract_numeric_answer(txt)
 
-        sc = 1.0 if no_triage else _score_text_for_mode(txt, task_mode, target_nums=target_nums)
+        # Score using appropriate triage method
+        if no_triage:
+            sc = 1.0
+        elif triage_method == "small_llm" and triage_gateway:
+            sc = _score_text_with_llm(txt, triage_gateway, task_mode, question, target_nums)
+        else:
+            sc = _score_text_for_mode(txt, task_mode, target_nums=target_nums)
         seed_pool.append((txt, pred, sc))
 
         u = out.get("usage", {}) or {}
@@ -506,7 +579,13 @@ def run_item(
         else:
             new_pred = extract_numeric_answer(new_txt)
 
-        new_sc = 1.0 if no_triage else _score_text_for_mode(new_txt, task_mode, target_nums=target_nums)
+        # Score refinement using appropriate triage method
+        if no_triage:
+            new_sc = 1.0
+        elif triage_method == "small_llm" and triage_gateway:
+            new_sc = _score_text_with_llm(new_txt, triage_gateway, task_mode, question, target_nums)
+        else:
+            new_sc = _score_text_for_mode(new_txt, task_mode, target_nums=target_nums)
         best_pool.append((new_txt, new_pred, new_sc))
 
         u = out.get("usage", {}) or {}

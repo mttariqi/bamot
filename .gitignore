@@ -125,3 +125,29 @@ run_llama_with_delay.sh
 
 # Figures (if not needed in repo)
 figures/
+
+# Documentation and analysis files (experiment notes, status reports)
+*.md
+!README.md
+!CONTRIBUTING.md
+
+# Experiment scripts (temporary/test scripts)
+test_*.sh
+run_ablation*.sh
+check_*.sh
+quick_test_*.py
+
+# Zip files
+*.zip
+
+# Experiment status files
+*_STATUS.md
+*_RESULTS.md
+*_COMPARISON.md
+*_ANALYSIS.md
+*_PLAN.md
+*_NARRATIVE.md
+*_SLIDES.md
+*_STATS.md
+*_INSTRUCTIONS.md
+*_REVIEW.md
